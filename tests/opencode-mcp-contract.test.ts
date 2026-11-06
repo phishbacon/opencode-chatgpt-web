@@ -50,7 +50,9 @@ async function fixture(contract: "native" | "opencode" = "opencode") {
     command: process.execPath,
     args: ["src/cli.ts", "mcp", "--contract", contract, "--broker-socket", socketPath],
     cwd: process.cwd(),
-    stderr: "pipe",
+    // Inherit stderr: an undrained "pipe" fills its buffer and blocks the MCP
+    // child on Windows, which stalls the initialize handshake indefinitely.
+    stderr: "inherit",
   });
   const client = new Client({ name: "opencode-website-contract-test", version: "1" });
   const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
@@ -58,8 +60,17 @@ async function fixture(contract: "native" | "opencode" = "opencode") {
     await client.close().catch(() => {});
     await broker.close();
   };
+  let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await client.connect(transport);
+    await Promise.race([
+      client.connect(transport),
+      new Promise<never>((_, reject) => {
+        handshakeTimer = setTimeout(
+          () => reject(new Error("MCP stdio initialize handshake timed out")),
+          20_000,
+        );
+      }),
+    ]).finally(() => clearTimeout(handshakeTimer));
   } catch (error) {
     await close();
     throw error;
