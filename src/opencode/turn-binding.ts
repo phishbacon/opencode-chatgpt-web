@@ -209,6 +209,14 @@ interface CurrentTurn {
 export class OpenCodeTurnIssuer {
   private readonly current = new Map<string, CurrentTurn>();
   private readonly compactionEpochs = new Map<string, number>();
+  /**
+   * Last trusted context per session. OpenCode can dispatch a compaction
+   * summary for a fresh prompt *before* that prompt's context hook runs, so
+   * compaction claims fall back to the most recently observed context of the
+   * same model (same inventory, same owner) instead of failing the turn.
+   * Primary requests never use this fallback.
+   */
+  private readonly sessionContexts = new Map<string, { model: string; toolsHash: string; owner: OpenCodeTurnOwner }>();
 
   constructor(private readonly signingKey: Buffer, private readonly clock: () => number = Date.now) {}
 
@@ -238,7 +246,9 @@ export class OpenCodeTurnIssuer {
     if (current.context && openCodeOwnerKey(current.context.owner) !== openCodeOwnerKey(owner)) {
       throw new OpenCodeTurnBindingError("Trusted OpenCode session owner changed within a turn");
     }
-    current.context = { model, toolsHash: hashOpenCodeTrustedTools(tools), owner: { ...owner } };
+    const context = { model, toolsHash: hashOpenCodeTrustedTools(tools), owner: { ...owner } };
+    current.context = context;
+    this.sessionContexts.set(sessionID, context);
   }
 
   signPrimaryRequest(sessionID: string, model: string): string {
@@ -277,7 +287,8 @@ export class OpenCodeTurnIssuer {
   signCompactionRequest(sessionID: string, model: string): string {
     const current = this.current.get(sessionID);
     if (!current) throw new OpenCodeTurnBindingError("No trusted OpenCode prompt owns this provider request");
-    if (!current.context || current.context.model !== model) {
+    const context = current.context ?? this.sessionContexts.get(sessionID);
+    if (!context || context.model !== model) {
       throw new OpenCodeTurnBindingError("Trusted OpenCode provider request has no matching tool context");
     }
     const now = Math.max(current.started, this.clock());
@@ -293,8 +304,8 @@ export class OpenCodeTurnIssuer {
       issuedAt: now,
       expiresAt: now + MAX_REQUEST_AGE_MS,
       model,
-      toolsHash: current.context.toolsHash,
-      owner: { ...current.context.owner },
+      toolsHash: context.toolsHash,
+      owner: { ...context.owner },
     };
     enforceClaims(claims);
     return signClaims(claims, this.signingKey);
@@ -303,6 +314,7 @@ export class OpenCodeTurnIssuer {
   retire(sessionID: string): void {
     this.current.delete(sessionID);
     this.compactionEpochs.delete(sessionID);
+    this.sessionContexts.delete(sessionID);
   }
 }
 

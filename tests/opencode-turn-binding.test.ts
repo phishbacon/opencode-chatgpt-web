@@ -199,6 +199,40 @@ describe("OpenCode turn ownership", () => {
     expect(f.verify(f.sign()).owner.agent).toBe("plan");
   });
 
+  test("prompt-start compaction reuses the last observed same-model context", () => {
+    const f = fixture();
+    f.begin();
+    const prior = f.verify(f.sign());
+    // OpenCode may dispatch compaction for a fresh prompt before that prompt's
+    // context hook runs; the compaction claims must bind the ACTIVE prompt but
+    // may fall back to the session's last trusted context of the same model.
+    // beginPrompt directly: the fixture's begin() would also observe context.
+    f.issuer.beginPrompt(SESSION, "msg_987654321");
+    const claims = f.verify(f.issuer.signCompactionRequest(SESSION, MODEL));
+    expect(claims.purpose).toBe("compaction");
+    expect(claims.messageID).toBe("msg_987654321");
+    expect(claims.toolsHash).toBe(prior.toolsHash);
+    expect(claims.owner).toEqual(OWNER);
+    expect(claims.turnNonce).not.toBe(prior.turnNonce);
+    // The primary request for the same prompt stays strict until its own
+    // context hook observes, and then signs normally.
+    expect(() => f.sign()).toThrow("no matching tool context");
+    f.issuer.observeContext(SESSION, MODEL, TOOLS, OWNER);
+    expect(() => f.sign()).not.toThrow();
+  });
+
+  test("prompt-start compaction refuses another model and an unseen session context", () => {
+    const f = fixture();
+    f.begin();
+    f.issuer.beginPrompt(SESSION, "msg_987654321");
+    expect(() => f.issuer.signCompactionRequest(SESSION, "opencode-chatgpt-web/other-model"))
+      .toThrow("no matching tool context");
+    const bare = new OpenCodeTurnIssuer(randomBytes(32), () => 1_800_000_000_000);
+    bare.beginPrompt("ses_abcdefgh", "msg_abcdefgh");
+    expect(() => bare.signCompactionRequest("ses_abcdefgh", MODEL))
+      .toThrow("no matching tool context");
+  });
+
   test("rejects same-nonce signed changes in session owner even when a second issuer holds the signing key", () => {
     const f = fixture();
     f.begin();
