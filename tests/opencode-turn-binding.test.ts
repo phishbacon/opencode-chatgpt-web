@@ -189,7 +189,7 @@ describe("OpenCode turn ownership", () => {
       .toThrow("session owner is invalid");
     f.issuer.observeContext(SESSION, MODEL, TOOLS, OWNER);
     const signed = f.sign();
-    expect(() => f.issuer.observeContext(SESSION, MODEL, TOOLS, { ...OWNER, cwd: "/tmp/other" }))
+    expect(() => f.issuer.observeContext(SESSION, MODEL, TOOLS, { ...OWNER, cwd: join(tmpdir(), "other-workspace") }))
       .toThrow("session owner changed within a turn");
     expect(() => f.issuer.observeContext(SESSION, MODEL, TOOLS, { ...OWNER, agent: "plan" }))
       .toThrow("session owner changed within a turn");
@@ -207,7 +207,7 @@ describe("OpenCode turn ownership", () => {
     // with the authenticated payload and re-sign using the fixture test key.
     const from = f.sign().split(".")[0]!;
     const claims = JSON.parse(Buffer.from(from, "base64url").toString("utf8"));
-    claims.owner.cwd = "/tmp/other";
+    claims.owner.cwd = join(tmpdir(), "other-workspace");
     const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
     const mac = createHmac("sha256", f.key).update(payload).digest("base64url");
     expect(() => f.verify(`${payload}.${mac}`)).toThrow("changed trusted session owner");

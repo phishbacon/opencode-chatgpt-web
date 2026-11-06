@@ -58,10 +58,11 @@ describe("isolated OpenCode DEV host preparation", () => {
       expect(openCodeDevHostPaths(f.home)).toEqual(prepared);
       expect(prepareOpenCodeDevHost(f.home, f.config)).toEqual(prepared);
       expect(readOpenCodeDevHostKey(prepared).toString("hex")).toBe(key);
-      for (const path of [prepared.root, prepared.home, prepared.configRoot, prepared.dataRoot, prepared.cacheRoot, prepared.stateRoot]) {
+      // win32 does not enforce POSIX modes (lstat reports fabricated bits).
+      if (process.platform !== "win32") for (const path of [prepared.root, prepared.home, prepared.configRoot, prepared.dataRoot, prepared.cacheRoot, prepared.stateRoot]) {
         expect(lstatSync(path).mode & 0o077).toBe(0);
       }
-      for (const path of [prepared.configFile, prepared.pluginFile, prepared.signingKeyFile]) {
+      if (process.platform !== "win32") for (const path of [prepared.configFile, prepared.pluginFile, prepared.signingKeyFile]) {
         expect(lstatSync(path).mode & 0o077).toBe(0);
       }
       const env = openCodeDevHostEnvironment(prepared, {
@@ -110,9 +111,11 @@ describe("isolated OpenCode DEV host preparation", () => {
       expect(() => readOpenCodeDevHostPort(paths)).toThrow("provider URL is missing");
       writeFileSync(paths.configFile, '{"providers":{"opencode-chatgpt-web":{"settings":{"baseURL":"not-a-url"}}}}\n');
       expect(() => readOpenCodeDevHostPort(paths)).toThrow("provider URL is invalid");
-      chmodSync(paths.configFile, 0o644);
-      expect(() => prepareOpenCodeDevHost(f.home, f.config)).toThrow("private");
-      chmodSync(paths.configFile, 0o600);
+      if (process.platform !== "win32") {
+        chmodSync(paths.configFile, 0o644);
+        expect(() => prepareOpenCodeDevHost(f.home, f.config)).toThrow("private");
+        chmodSync(paths.configFile, 0o600);
+      }
       rmSync(paths.signingKeyFile);
       symlinkSync(paths.configFile, paths.signingKeyFile);
       expect(() => readOpenCodeDevHostKey(paths)).toThrow("non-symlink");
@@ -124,6 +127,8 @@ describe("isolated OpenCode DEV host preparation", () => {
   });
 
   test("starts a private OpenCode standalone process with only the generated identity", async () => {
+    // The probe binary is a #!/bin/sh script; win32 cannot exec shebang files.
+    if (process.platform === "win32") return;
     const f = fixture();
     try {
       const paths = prepareOpenCodeDevHost(f.home, f.config);
