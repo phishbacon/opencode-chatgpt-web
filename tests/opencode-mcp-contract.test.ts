@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deliverOpenCodeToolResult } from "../src/adapters/chatgpt-web/index";
 import { callTurnBroker, MAX_TURN_MCP_ACTIVITY_IDS, RemoteTurnBroker, TurnBroker, TurnBrokerTimeoutError } from "../src/adapters/chatgpt-web/turn-broker";
+import { defaultBrokerEndpoint } from "../src/config";
 import type { ChatGptTurnEnvironment } from "../src/adapters/chatgpt-web/environment";
 
 const shell = { name: "shell", description: "Execute a command in the originating session", parameters: {
@@ -40,7 +41,10 @@ function environment(origin?: "opencode"): ChatGptTurnEnvironment {
 
 let sequence = 0;
 async function fixture(contract: "native" | "opencode" = "opencode") {
-  const socketPath = join(tmpdir(), `oc-mcp-${process.pid}-${++sequence}.sock`);
+  const endpointName = `oc-mcp-${process.pid}-${++sequence}`;
+  const socketPath = process.platform === "win32"
+    ? defaultBrokerEndpoint(join(tmpdir(), endpointName), "win32")
+    : join(tmpdir(), `${endpointName}.sock`);
   const broker = TurnBroker.forSocket(socketPath);
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -97,7 +101,10 @@ describe("OpenCode website MCP contract", () => {
   }, 15_000);
 
   test("bounds retained activity IDs while preserving retries and completion tombstones", async () => {
-    const socketPath = join(tmpdir(), `oc-activity-cap-${process.pid}-${Date.now()}.sock`);
+    const endpointName = `oc-activity-cap-${process.pid}-${Date.now()}`;
+    const socketPath = process.platform === "win32"
+      ? defaultBrokerEndpoint(join(tmpdir(), endpointName), "win32")
+      : join(tmpdir(), `${endpointName}.sock`);
     const broker = TurnBroker.forSocket(socketPath);
     const token = await broker.register(environment("opencode"), 60_000);
     const activeActivityId = "activity_active_0000000000000001";

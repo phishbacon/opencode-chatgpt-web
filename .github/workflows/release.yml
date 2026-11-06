@@ -115,7 +115,7 @@ jobs:
             --label "org.opencontainers.image.version=${GITHUB_REF_NAME}" \
             --label "org.opencontainers.image.title=OpenCode ChatGPT Web browser container" \
             --label "org.opencontainers.image.description=Electron ChatGPT browser, Responses bridge, turn broker, tunnel-client and website MCP with Xvnc/noVNC for interactive login" \
-            -t "${IMAGE}:${GITHUB_REF_NAME}" \
+            -t "${image}:${GITHUB_REF_NAME}" \
             .
       # The published image must carry the whole noVNC login stack: Xvnc,
       # websockify, the noVNC web client, env-driven VNC auth, the loopback
@@ -123,6 +123,7 @@ jobs:
       - name: Smoke-test the noVNC setup inside the image
         run: |
           set -euo pipefail
+          IMAGE="${IMAGE:?IMAGE is exported by the build step}"
           mkdir -p ci-secrets
           printf 'ci-dummy-turn-signing-key\n' > ci-secrets/turn-signing.key
           printf 'ci-dummy-tunnel-runtime-key\n' > ci-secrets/tunnel-runtime.key
@@ -147,6 +148,7 @@ jobs:
           docker rm -f novnc-smoke >/dev/null
       - name: Push image
         run: |
+          IMAGE="${IMAGE:?IMAGE is exported by the build step}"
           docker push "${IMAGE}:${GITHUB_REF_NAME}"
           # Prerelease tags (v1.2.3-rc1) never move the rolling latest tag.
           if [[ "$GITHUB_REF_NAME" != *-* ]]; then

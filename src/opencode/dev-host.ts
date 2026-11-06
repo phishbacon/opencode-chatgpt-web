@@ -55,7 +55,12 @@ export function openCodeDevHostPaths(profileHome: string): OpenCodeDevHostPaths 
 function privateDirectory(path: string): void {
   if (!existsSync(path)) mkdirSync(path, { recursive: true, mode: 0o700 });
   const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`OpenCode DEV host requires a private, non-symlink directory: ${path}`);
+  }
+  // POSIX mode bits are not enforced on win32 (mkdir ignores them, lstat reports
+  // fabricated bits), so the privacy assertion only holds on POSIX platforms.
+  if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
     throw new Error(`OpenCode DEV host requires a private, non-symlink directory: ${path}`);
   }
 }
@@ -67,7 +72,8 @@ function privateFile(path: string): string | undefined {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+  if (!stat.isFile() || stat.isSymbolicLink()
+    || (process.platform !== "win32" && (stat.mode & 0o077) !== 0)) {
     throw new Error(`OpenCode DEV host requires a private, non-symlink file: ${path}`);
   }
   return readFileSync(path, "utf8");
