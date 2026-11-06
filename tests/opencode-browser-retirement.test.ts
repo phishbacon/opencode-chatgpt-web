@@ -4,6 +4,8 @@
  * a verified signed compaction generation reaches the shared adapter. These
  * tests exercise that lifecycle without starting OpenCode or a real browser.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "bun:test";
 import {
   ChatGptTextFeed, ChatGptTraceFeed, ChatGptTurnSessions,
@@ -14,7 +16,7 @@ import type { OpenCodeTurnOwner } from "../src/opencode/turn-binding";
 const SESSION = "ses_123456789";
 const OWNER = "verified-opencode-owner";
 const TRUSTED_OWNER: OpenCodeTurnOwner = {
-  cwd: "/tmp/example-workspace", projectID: "pro_123456789", agent: "build",
+  cwd: join(tmpdir(), "example-workspace"), projectID: "pro_123456789", agent: "build",
 };
 
 function epochInput(epoch: number): CodexParsedRequest {

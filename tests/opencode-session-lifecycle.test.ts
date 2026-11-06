@@ -4,6 +4,8 @@
  * host session.deleted event with a signed, owner-bound notice to the local
  * Responses bridge; these tests cover rejection, retry, and physical cleanup.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { defaultConfig } from "../src/config";
@@ -18,7 +20,7 @@ import { startServer } from "../src/server";
 import type { CodexParsedRequest } from "../src/types";
 
 const SESSION = "ses_123456789";
-const OWNER = { cwd: "/tmp/example-workspace", projectID: "pro_123456789", agent: "build" };
+const OWNER = { cwd: join(tmpdir(), "example-workspace"), projectID: "pro_123456789", agent: "build" };
 const MODEL = "opencode-chatgpt-web/light";
 const TOOLS = { shell: { description: "Execute a command", input: { type: "object", properties: {} } } };
 
@@ -80,7 +82,7 @@ describe("OpenCode signed deletion notices", () => {
     expect(() => consumeOpenCodeSessionDeletion(f.notice, f.key, f.verifier, f.now - 5_001))
       .toThrow("invalid or expired");
     expect(() => consumeOpenCodeSessionDeletion(
-      signOpenCodeSessionDeletion(f.key, SESSION, { ...OWNER, cwd: "/tmp/other-workspace" }, f.now),
+      signOpenCodeSessionDeletion(f.key, SESSION, { ...OWNER, cwd: join(tmpdir(), "other-workspace") }, f.now),
       f.key, f.verifier, f.now,
     )).toThrow("owner does not match");
     // A rejected notice does not revoke the legitimate session.

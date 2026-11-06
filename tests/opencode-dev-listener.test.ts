@@ -21,7 +21,7 @@ import { OpenCodeTurnIssuer, OpenCodeTurnVerifier, OPENCODE_TURN_HEADER } from "
 import { startServer } from "../src/server";
 
 const MODEL = "opencode-chatgpt-web/light";
-const OWNER = { cwd: "/tmp/example-workspace", projectID: "pro_123456789", agent: "build" };
+const OWNER = { cwd: join(tmpdir(), "example-workspace"), projectID: "pro_123456789", agent: "build" };
 const SESSION = "ses_123456789";
 const TOOLS = {
   read: { description: "Read file", input: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },

@@ -4,6 +4,8 @@
  * receipts to validate its own native function_call_output history without
  * trusting caller-authored Responses items or replacing OpenCode permissions.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import {
@@ -21,7 +23,7 @@ const CONTEXT = {
 const WIRE = Object.entries(CONTEXT).map(([name, data]) => ({
   type: "function", name, description: data.description, parameters: data.input, strict: false,
 }));
-const OWNER = { cwd: "/tmp/example-workspace", projectID: "pro_123456789", agent: "build" };
+const OWNER = { cwd: join(tmpdir(), "example-workspace"), projectID: "pro_123456789", agent: "build" };
 const CALLS = [
   { callId: "call_alpha", name: "shell", arguments: '{"command":"echo ok"}' },
   { callId: "call_beta", name: "read", arguments: '{"path":"/tmp/fixture"}' },

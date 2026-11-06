@@ -18,7 +18,7 @@ const MODEL = { providerID: "opencode-chatgpt-web", id: "gpt-6" };
 const TOOLS = { shell: { description: "Run a shell command", input: {
   type: "object", properties: { command: { type: "string" } },
 } } };
-const LOCATION = { directory: "/tmp/open-code-workspace", workspaceID: "wrk_test" };
+const LOCATION = { directory: join(tmpdir(), "open-code-workspace"), workspaceID: "wrk_test" };
 
 type LifecycleEvent = {
   type: string;
@@ -202,7 +202,7 @@ describe("OpenCode trusted identity plugin lifecycle", () => {
       await f.begin();
       const first = f.verifier.verify((await f.sign())!, { model: "opencode-chatgpt-web/gpt-6" });
       await f.events.send({ type: "session.compaction.ended", data: { sessionID: SESSION },
-        location: { directory: "/tmp/other-workspace", workspaceID: LOCATION.workspaceID } });
+        location: { directory: join(tmpdir(), "other-workspace"), workspaceID: LOCATION.workspaceID } });
       await f.events.send({ type: "session.compacted", data: { sessionID: SESSION },
         location: { directory: LOCATION.directory, workspaceID: "other-workspace" } });
       const unchanged = f.verifier.verify((await f.sign())!, { model: "opencode-chatgpt-web/gpt-6" });
@@ -234,7 +234,7 @@ describe("OpenCode trusted identity plugin lifecycle", () => {
       await f.begin();
       f.verifier.verify((await f.sign())!, { model: "opencode-chatgpt-web/gpt-6" });
       await f.events.send({ type: "session.deleted", data: { sessionID: SESSION },
-        location: { ...LOCATION, directory: "/tmp/foreign-workspace" } });
+        location: { ...LOCATION, directory: join(tmpdir(), "foreign-workspace") } });
       await f.events.send({ type: "session.deleted", data: { sessionID: SESSION },
         location: { ...LOCATION, workspaceID: "foreign" } });
       expect(delivered).toEqual([]);

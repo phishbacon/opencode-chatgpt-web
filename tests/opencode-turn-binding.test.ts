@@ -3,6 +3,8 @@
  * metadata. OpenCode must authenticate an equivalent owner through signed V2
  * hook claims; these tests verify the OpenCode-only trust boundary.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { createHmac, randomBytes } from "node:crypto";
 import {
@@ -19,7 +21,7 @@ const TOOLS = {
   shell: { description: "Execute command", input: { type: "object", properties: { command: { type: "string" } } } },
   read: { description: "Read a file", input: { type: "object", properties: { path: { type: "string" } } } },
 };
-const OWNER = { cwd: "/tmp/example-workspace", projectID: "pro_123456789", agent: "build" };
+const OWNER = { cwd: join(tmpdir(), "example-workspace"), projectID: "pro_123456789", agent: "build" };
 
 function fixture() {
   const key = randomBytes(32);

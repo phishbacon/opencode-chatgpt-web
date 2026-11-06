@@ -4,6 +4,8 @@
  * browser transport but keeps its own canonical role history, live identifiers,
  * plugin name and OPENCODE_MULTIPART_ACK protocol intact.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import {
@@ -44,7 +46,7 @@ function openCodeRequest(): CodexParsedRequest {
       turnStarted: 1_800_000_000_000, compactionEpoch: 0,
       issuedAt: 1_800_000_000_001, expiresAt: 1_800_000_120_001,
       model: "opencode-chatgpt-web/gpt-6", toolsHash: "3".repeat(64),
-      owner: { cwd: "/tmp/open-code-project", projectID: "pro_123456789", agent: "build" },
+      owner: { cwd: join(tmpdir(), "open-code-project"), projectID: "pro_123456789", agent: "build" },
     },
   };
 }

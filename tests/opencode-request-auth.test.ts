@@ -3,6 +3,8 @@
  * rollout provenance. OpenCode signs its V2 model-request identity instead;
  * this verifies the dedicated boundary before the shared Responses handler.
  */
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { defaultConfig } from "../src/config";
@@ -24,7 +26,7 @@ const TOOL_CONTEXT = {
 const TOOLS = Object.entries(TOOL_CONTEXT).map(([name, value]) => ({
   type: "function", name, description: value.description, parameters: value.input, strict: false,
 }));
-const OWNER = { cwd: "/tmp/example-workspace", projectID: "pro_123456789", agent: "build" };
+const OWNER = { cwd: join(tmpdir(), "example-workspace"), projectID: "pro_123456789", agent: "build" };
 
 function fixture() {
   const key = randomBytes(32);
@@ -292,7 +294,7 @@ describe("OpenCode Responses ingress", () => {
     const current = route(base);
     const other = route({ ...base, sessionID: "ses_another123", messageID: "msg_another123" });
     const nextTurn = route({ ...base, messageID: "msg_nextturn123", turnNonce: "f".repeat(32) });
-    const differentOwner = route({ ...base, owner: { ...base.owner, cwd: "/tmp/other-workspace" } });
+    const differentOwner = route({ ...base, owner: { ...base.owner, cwd: join(tmpdir(), "other-workspace") } });
     const afterCompaction = route({ ...base, compactionEpoch: base.compactionEpoch + 1 });
     expect(chatGptThreadOwnershipKey(current)).not.toBe(chatGptThreadOwnershipKey(other));
     expect(chatGptConversationKey(current, "test")).not.toBe(chatGptConversationKey(other, "test"));
