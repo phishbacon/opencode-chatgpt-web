@@ -5,6 +5,7 @@ import { unzipSync } from "fflate";
 import type { AppConfig, BrowserInteractionMode, TunnelConfig } from "./config";
 import { atomicWriteFile, getConfigDir } from "./config";
 import { runCommand, runChecked } from "./process";
+import { resolveWebsiteMcpContract } from "./opencode/website-connector";
 
 export const TUNNEL_VERSION = "0.0.16";
 const MIGRATABLE_TUNNEL_VERSIONS = new Set(["0.0.10", "0.0.12"]);
@@ -250,7 +251,7 @@ function tunnelCommandQuoted(value: string): string {
 }
 
 export function mcpCommand(config: AppConfig, platform = process.platform): string {
-  const contract = config.browserInteractionMode === "manual" ? "safe" : "native";
+  const contract = resolveWebsiteMcpContract(config);
   const command = [
     ...config.runtimeCommand,
     "mcp",

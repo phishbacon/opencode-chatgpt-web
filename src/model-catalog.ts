@@ -35,7 +35,7 @@ function modelPriority(template: JsonObject): number | undefined {
   const value = template.priority;
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isSafeInteger(value)) {
-    throw new Error("Native Codex model template priority must be an integer");
+    throw new Error("Native OpenCode model template priority must be an integer");
   }
   return value;
 }
@@ -50,7 +50,7 @@ function routedModelPriority(
     || config.subagentProtocol !== "compatibility-v1"
     || !["chatgpt-web/light", "chatgpt-web/gpt-5.6-sol-instant", "chatgpt-web/gpt-6-sol-instant"].includes(route.slug)) return priority;
   if (priority === Number.MAX_SAFE_INTEGER) {
-    throw new Error("Native Codex model template priority cannot reserve the Compatibility V1 roster");
+    throw new Error("Native OpenCode model template priority cannot reserve the Compatibility V1 roster");
   }
   // Preserve the native model and the reasoning/Pro choices in Codex V1's bounded registry.
   return priority + 1;
@@ -77,8 +77,8 @@ function selectNativeTemplate(models: unknown[], config: AppConfig): JsonObject 
   if (template) return template;
   throw new Error(
     requireTools
-      ? "Native Codex models response has no list-visible, tool-capable model with reasoning metadata"
-      : "Native Codex models response has no list-visible model with reasoning metadata",
+      ? "Native OpenCode models response has no list-visible, tool-capable model with reasoning metadata"
+      : "Native OpenCode models response has no list-visible model with reasoning metadata",
   );
 }
 
@@ -98,10 +98,10 @@ export function buildChatGptWebModel(
   route: ChatGptWebModelRoute,
   config: AppConfig,
 ): JsonObject {
-  const template = object(templateValue, "native Codex model template");
+  const template = object(templateValue, "native OpenCode model template");
   const templateSlug = slug(template);
   if (!templateSlug || templateSlug.startsWith(CHATGPT_WEB_MODEL_PREFIX)) {
-    throw new Error("ChatGPT Web model template must be a native Codex model");
+    throw new Error("ChatGPT Web model template must be a native OpenCode model");
   }
   const modelFamily = route.interactionMode === "automatic" ? route.modelFamily : undefined;
   const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, config, modelFamily);
@@ -167,9 +167,9 @@ export function augmentNativeModelCatalog(
   config: AppConfig,
   contextOverride?: CodexModelContextOverride,
 ): JsonObject {
-  const catalog = object(value, "native Codex models response");
+  const catalog = object(value, "native OpenCode models response");
   if (!Array.isArray(catalog.models)) {
-    throw new Error("Native Codex models response is missing a models array");
+    throw new Error("Native OpenCode models response is missing a models array");
   }
   const nativeModels = structuredClone(
     catalog.models.filter(model => !slug(model)?.startsWith(CHATGPT_WEB_MODEL_PREFIX)),

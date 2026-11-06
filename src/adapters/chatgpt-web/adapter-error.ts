@@ -24,7 +24,7 @@ export class ChatGptWebAdapterError extends Error {
 
 export function chatGptToolTimeoutError(tool: string, timeoutMs: number): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(
-    `Codex tool ${tool} did not return a result within ${timeoutMs / 1_000} seconds. `
+    `OpenCode tool ${tool} did not return a result within ${timeoutMs / 1_000} seconds. `
     + "The turn was stopped. Check whether the command is still running or waiting for approval before retrying.",
     { status: 504, errorType: "server_error", code: "codex_tool_timeout", retryable: false },
   );
@@ -54,7 +54,7 @@ export class ChatGptCompactionHandoffAccepted extends DOMException {
 
 export function chatGptBrowserTabClosedError(): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(
-    "The ChatGPT browser tab was closed, so the Codex turn was cancelled.",
+    "The ChatGPT browser tab was closed, so the OpenCode turn was cancelled.",
     {
       status: 499,
       errorType: "client_closed_request",
@@ -66,7 +66,14 @@ export function chatGptBrowserTabClosedError(): ChatGptWebAdapterError {
 
 export function chatGptTurnSupersededError(): ChatGptWebAdapterError {
   return new ChatGptWebAdapterError(
-    "A newer Codex instruction superseded this ChatGPT response.",
+    "A newer OpenCode instruction superseded this ChatGPT response.",
+    { status: 499, errorType: "client_closed_request", code: "client_cancelled", retryable: false },
+  );
+}
+
+export function chatGptOpenCodeCompactionRetiredError(): ChatGptWebAdapterError {
+  return new ChatGptWebAdapterError(
+    "OpenCode compaction retired this pre-compaction ChatGPT response.",
     { status: 499, errorType: "client_closed_request", code: "client_cancelled", retryable: false },
   );
 }

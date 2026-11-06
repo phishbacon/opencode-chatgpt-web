@@ -31,8 +31,8 @@ test.each([[false, false], [false, true], [true, false], [true, true]])("helper 
   expect(await verifyConnectorWithBrowserHelper({
     helper: { executable: process.execPath, script: helper },
     descriptorPath: join(root, "launcher.json"),
-    appName: "Codex Native2", useTemporaryChats, useSavedChats,
-  })).toEqual({ ok: true, appName: "Codex Native2" });
+    appName: "OpenCode Native2", useTemporaryChats, useSavedChats,
+  })).toEqual({ ok: true, appName: "OpenCode Native2" });
 });
 
 test("daemon streams browser lifecycle through the real helper process", async () => {
@@ -96,7 +96,7 @@ test("daemon streams browser lifecycle through the real helper process", async (
     createdAt: new Date().toISOString(),
   })}\n`, { mode: 0o600 });
   const config: ResolvedBrowserConfig = {
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     browserHost: "launcher",
     browserHostDescriptorPath: descriptorPath,
     browserHelperScriptPath: helper,
@@ -217,7 +217,7 @@ test("accepted compaction retires through the helper as completed without hiding
     surfaceTargets: { launcher_surface_id_0123456789AB: "native-owned-target" },
   }), { mode: 0o600 });
   const client = new LauncherBrowserHelperClient({
-    appName: "Codex Native2", browserHost: "launcher", browserHostDescriptorPath: descriptorPath,
+    appName: "OpenCode Native2", browserHost: "launcher", browserHostDescriptorPath: descriptorPath,
     browserHelperScriptPath: helper, browserDiagnosticsPath: join(root, "diagnostics"),
     storageStatePath: join(root, "unused-state.json"), chromeExecutablePath: join(root, "unused-chrome"),
     turnTimeoutMs: 60_000, headed: true, autoApproveToolCalls: false, useTemporaryChats: false,
@@ -265,7 +265,7 @@ test("accepted compaction retires through the helper as completed without hiding
 test("launcher helper protocol preserves multipart context, broker identity and the compaction flag", async () => {
   const sent: Record<string, unknown>[] = [];
   const client = new LauncherBrowserHelperClient({
-    appName: "Codex Native2 DEV",
+    appName: "OpenCode Native2 DEV",
     browserHost: "launcher",
     browserHostDescriptorPath: "/durable/launcher.json",
     storageStatePath: "/durable/unused-state.json",
@@ -451,7 +451,7 @@ test("structured helper errors preserve the ChatGPT adapter failure contract", a
 
 test("an older helper cannot silently drop selected skill files and releases the prepared turn", async () => {
   const client = new LauncherBrowserHelperClient({
-    appName: "Codex Native2", browserHost: "launcher", browserHostDescriptorPath: "/durable/launcher.json",
+    appName: "OpenCode Native2", browserHost: "launcher", browserHostDescriptorPath: "/durable/launcher.json",
     storageStatePath: "/durable/unused.json", chromeExecutablePath: "/durable/chrome", headed: true, autoApproveToolCalls: false, useTemporaryChats: false,
   });
   const internal = client as unknown as {

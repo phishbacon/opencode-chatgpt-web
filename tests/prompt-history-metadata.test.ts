@@ -55,7 +55,7 @@ function parsed(): CodexParsedRequest {
 
 function inlineEnvelope(text: string): Record<string, unknown> {
   const match = text.match(/<codex_context_json>\n([^\n]+)\n<\/codex_context_json>/);
-  if (!match?.[1]) throw new Error("inline Codex context JSON missing");
+  if (!match?.[1]) throw new Error("inline OpenCode context JSON missing");
   return JSON.parse(match[1]) as Record<string, unknown>;
 }
 

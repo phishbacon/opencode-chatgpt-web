@@ -11,6 +11,8 @@ export type ChatGptSandboxPolicy =
   | { type: "workspaceWrite"; writableRoots: string[]; networkAccess: boolean };
 
 export interface ChatGptTurnEnvironment {
+  /** Signed OpenCode-originated turns use the OpenCode MCP registry and native permissions. */
+  origin?: "opencode";
   cwd: string;
   roots: string[];
   writableRoots: string[];
@@ -48,12 +50,12 @@ export interface ChatGptTurnUserRevision {
 }
 
 export const CHATGPT_TURN_REVISION_CONFLICT_MESSAGE =
-  "ChatGPT web current user message conflicts with native Codex turn_id metadata";
+  "ChatGPT web current user message conflicts with native OpenCode turn_id metadata";
 
 export class MissingTrustedCodexEnvironmentError extends Error {
   constructor(field: string) {
-    super(`ChatGPT web turn is missing ${field} in trusted Codex environment context`);
-    this.name = "MissingTrustedCodexEnvironmentError";
+    super(`ChatGPT web turn is missing ${field} in trusted OpenCode environment context`);
+    this.name = "MissingTrustedOpenCodeEnvironmentError";
   }
 }
 
@@ -259,7 +261,7 @@ export function priorChatGptAbortedTurnIds(parsed: CodexParsedRequest): string[]
 export function extractChatGptTurnUserRevision(parsed: CodexParsedRequest): unknown {
   const identity = extractChatGptTurnIdentity(parsed);
   const turnId = identity.turnId;
-  if (!turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  if (!turnId) throw new Error("ChatGPT web requires native OpenCode turn_id metadata for browser-session replay");
   const revision = latestChatGptTurnUserRevision(parsed, turnId);
   if (!revision) throw new Error("ChatGPT web requires a current-turn user message for browser-session replay");
   // A pre-turn compact may summarize an earlier user message before native Codex continues
@@ -945,6 +947,18 @@ function matchesPath(root: string, path: string): boolean {
 }
 
 export function extractChatGptTurnEnvironment(parsed: CodexParsedRequest): ChatGptTurnEnvironment {
+  if (parsed._openCodeTurn) {
+    // Codex derives sandbox presentation from trusted rollout environment.
+    // OpenCode supplies only a signed workspace owner; native OpenCode tools
+    // retain all actual filesystem/network permissions and approval decisions.
+    const cwd = parsed._openCodeTurn.owner.cwd;
+    return {
+      origin: "opencode",
+      cwd, roots: [cwd], writableRoots: [],
+      sandboxPolicy: { type: "readOnly", networkAccess: false },
+      tools: parsed.context.tools ?? [],
+    };
+  }
   const environment = extractChatGptTurnEnvironmentClaim(parsed).environment;
   if (environment.cwd === undefined) throw new MissingTrustedCodexEnvironmentError("cwd");
   if (!environment.roots.some(root => matchesPath(root, environment.cwd!))) {
@@ -975,11 +989,11 @@ function environmentPaths(text: string, preferredRoots: string[]): { cwd?: strin
     return { roots: uniqueAbsolutePaths(rootMatches, "workspace_roots") };
   }
   const cwdCandidates = uniqueAbsolutePaths(cwdMatches, "cwd");
-  if (cwdCandidates.length !== 1) throw new Error("ChatGPT web turn has conflicting trusted Codex cwd values");
+  if (cwdCandidates.length !== 1) throw new Error("ChatGPT web turn has conflicting trusted OpenCode cwd values");
   const cwd = cwdCandidates[0]!;
   const roots = rootMatches.length > 0 ? uniqueAbsolutePaths(rootMatches, "workspace_roots") : [cwd];
   if (!roots.some(root => matchesPath(root, cwd)) && sandboxTypeFromEnvironment(text) !== "dangerFullAccess") {
-    throw new Error("ChatGPT web cwd is outside the trusted Codex workspace roots");
+    throw new Error("ChatGPT web cwd is outside the trusted OpenCode workspace roots");
   }
   return { cwd, roots };
 }
@@ -992,7 +1006,7 @@ function parseChatGptEnvironmentText(parsed: CodexParsedRequest, text: string): 
     || /network access is enabled/i.test(text);
 
   if (!sandboxType) {
-    throw new Error("ChatGPT web turn requires one explicit trusted Codex sandbox mode");
+    throw new Error("ChatGPT web turn requires one explicit trusted OpenCode sandbox mode");
   }
   if (sandboxType === "dangerFullAccess") {
     return { ...paths, writableRoots: roots, sandboxPolicy: { type: "dangerFullAccess" }, tools: parsed.context.tools ?? [] };
@@ -1009,6 +1023,11 @@ function parseChatGptEnvironmentText(parsed: CodexParsedRequest, text: string): 
 }
 
 export function extractChatGptTurnIdentity(parsed: CodexParsedRequest): ChatGptTurnIdentity {
+  if (parsed._openCodeTurn) {
+    // OpenCode session and prompt IDs replace Codex's native rollout IDs.
+    const { sessionID, messageID, turnNonce, owner } = parsed._openCodeTurn;
+    return { threadId: sessionID, turnId: `${messageID}:${turnNonce}`, agentName: owner.agent };
+  }
   const body = record(parsed._rawBody);
   return {
     ...extractCodexTurnIdentityFromBody(body),

@@ -42,7 +42,7 @@ for (const format of ["v1", "v2"] as const) {
       for (const rejected of [parse(changedHistory), parse(changedCheckpoint)]) {
         rejected._compactionRequest = true;
         expect(extractChatGptCompactionSourceRevision(rejected).itemId).toBe(human.id);
-        expect(() => extractChatGptTurnUserRevision(rejected)).toThrow("conflicts with native Codex turn_id");
+        expect(() => extractChatGptTurnUserRevision(rejected)).toThrow("conflicts with native OpenCode turn_id");
       }
     }
     const steering = { type: "message", role: "user", id: "new_steering", content: human.content,

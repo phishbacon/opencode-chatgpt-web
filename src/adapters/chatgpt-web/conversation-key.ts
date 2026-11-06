@@ -15,8 +15,9 @@ function messageText(item: Record<string, unknown>): string | undefined {
 }
 
 /** Native compaction remains part of the exact identity of a replayed Codex turn. */
-function compactionEpoch(input: unknown[] | undefined): unknown {
-  return input?.findLast(item => {
+function compactionEpoch(input: unknown): unknown {
+  if (!Array.isArray(input)) return null;
+  return input.findLast(item => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return false;
     const record = item as Record<string, unknown>;
     return record.type === "compaction"
@@ -30,6 +31,19 @@ export function chatGptConversationKey(
   parsed: CodexParsedRequest,
   namespace: string,
 ): string | undefined {
+  if (parsed._openCodeTurn) {
+    const { sessionID, owner, compactionEpoch: signedCompactionEpoch } = parsed._openCodeTurn;
+    const raw = parsed._rawBody as { input?: unknown[] } | undefined;
+    return createHash("sha256").update(JSON.stringify({
+      kind: "opencode", namespace, sessionID, owner,
+      modelId: parsed.modelId, reasoning: parsed.options.reasoning,
+      modelFamily: parsed._chatgptModelFamily,
+      // Codex marks compaction in its native rollout. OpenCode signs the
+      // equivalent lifecycle event, even if its summary has no marker.
+      signedCompactionEpoch,
+      compaction: compactionEpoch(raw?.input),
+    })).digest("hex");
+  }
   const identity = extractChatGptTurnIdentity(parsed);
   if (!identity.threadId) return undefined;
   const raw = parsed._rawBody as { input?: unknown[] } | undefined;

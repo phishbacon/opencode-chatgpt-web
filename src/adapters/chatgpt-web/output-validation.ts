@@ -34,7 +34,7 @@ export function createChatGptStructuredOutputValidator(
     validate = ajv.compile(format.schema as object | boolean);
   } catch (cause) {
     throw new ChatGptWebAdapterError(
-      `Codex supplied an invalid strict JSON schema ${JSON.stringify(format.name)}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `OpenCode supplied an invalid strict JSON schema ${JSON.stringify(format.name)}: ${cause instanceof Error ? cause.message : String(cause)}`,
       {
         status: 400,
         errorType: "invalid_request_error",
@@ -50,13 +50,13 @@ export function createChatGptStructuredOutputValidator(
       value = JSON.parse(answer);
     } catch {
       throw validationError(
-        `ChatGPT Web returned malformed JSON for strict Codex output schema ${JSON.stringify(format.name)}`,
+        `ChatGPT Web returned malformed JSON for strict OpenCode output schema ${JSON.stringify(format.name)}`,
       );
     }
     if (validate(value)) return;
     const detail = ajv.errorsText(validate.errors, { separator: "; " });
     throw validationError(
-      `ChatGPT Web returned JSON that does not satisfy strict Codex output schema ${JSON.stringify(format.name)}${detail ? `: ${detail}` : ""}`,
+      `ChatGPT Web returned JSON that does not satisfy strict OpenCode output schema ${JSON.stringify(format.name)}${detail ? `: ${detail}` : ""}`,
     );
   };
 }

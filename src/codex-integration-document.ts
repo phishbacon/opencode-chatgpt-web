@@ -120,7 +120,7 @@ function parseInlineBooleanField(raw: string, key: string): InlineBooleanField |
   while (closeIndex > openIndex && /\s/.test(value[closeIndex - 1]!)) closeIndex -= 1;
   closeIndex -= 1;
   if (value[closeIndex] !== "}") {
-    throw new Error(`Could not parse ${key} inline table in Codex [features]`);
+    throw new Error(`Could not parse ${key} inline table in OpenCode [features]`);
   }
 
   const segments: Array<readonly [number, number]> = [];
@@ -156,11 +156,11 @@ function parseInlineBooleanField(raw: string, key: string): InlineBooleanField |
       segmentStart = index + 1;
     }
     if (squareDepth < 0 || curlyDepth < 0) {
-      throw new Error(`Could not parse ${key} inline table in Codex [features]`);
+      throw new Error(`Could not parse ${key} inline table in OpenCode [features]`);
     }
   }
   if (quote || squareDepth !== 0 || curlyDepth !== 0) {
-    throw new Error(`Could not parse ${key} inline table in Codex [features]`);
+    throw new Error(`Could not parse ${key} inline table in OpenCode [features]`);
   }
   segments.push([segmentStart, closeIndex]);
 
@@ -169,7 +169,7 @@ function parseInlineBooleanField(raw: string, key: string): InlineBooleanField |
     if (!value.slice(start, end).trim()) continue;
     const equals = topLevelEquals(value, start, end);
     if (equals === undefined) {
-      throw new Error(`Could not parse ${key} inline table in Codex [features]`);
+      throw new Error(`Could not parse ${key} inline table in OpenCode [features]`);
     }
     if (decodeTomlInlineKey(value.slice(start, equals)) !== "enabled") continue;
     let fieldStart = equals + 1;
@@ -178,10 +178,10 @@ function parseInlineBooleanField(raw: string, key: string): InlineBooleanField |
     while (fieldEnd > fieldStart && /\s/.test(value[fieldEnd - 1]!)) fieldEnd -= 1;
     const fieldValue = value.slice(fieldStart, fieldEnd);
     if (fieldValue !== "true" && fieldValue !== "false") {
-      throw new Error("enabled in Codex [features].multi_agent_v2 inline table must be a boolean");
+      throw new Error("enabled in OpenCode [features].multi_agent_v2 inline table must be a boolean");
     }
     if (match) {
-      throw new Error("Codex [features].multi_agent_v2 inline table contains duplicate enabled assignments");
+      throw new Error("OpenCode [features].multi_agent_v2 inline table contains duplicate enabled assignments");
     }
     match = { value: fieldValue, start: fieldStart, end: fieldEnd };
   }
@@ -202,11 +202,11 @@ function decodeTomlString(raw: string, key: string): string {
     try {
       return JSON.parse(value) as string;
     } catch {
-      throw new Error(`Could not parse ${key} in Codex config`);
+      throw new Error(`Could not parse ${key} in OpenCode config`);
     }
   }
   if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
-  throw new Error(`${key} in Codex config must be a quoted string`);
+  throw new Error(`${key} in OpenCode config must be a quoted string`);
 }
 
 export function findTopLevelAssignment(lines: string[], key: string): PreviousAssignment {
@@ -218,7 +218,7 @@ export function findTopLevelAssignment(lines: string[], key: string): PreviousAs
     const match = regex.exec(line);
     if (match) matches.push({ present: true, rawLine: line, value: decodeTomlString(match[1]!, key), index });
   }
-  if (matches.length > 1) throw new Error(`Codex config contains duplicate top-level ${key} assignments`);
+  if (matches.length > 1) throw new Error(`OpenCode config contains duplicate top-level ${key} assignments`);
   return matches[0] ?? { present: false };
 }
 
@@ -231,12 +231,12 @@ function findTopLevelPositiveInteger(lines: string[], key: string): number | und
     const match = regex.exec(line);
     if (match) matches.push(stripTomlComment(match[1]!).trim());
   }
-  if (matches.length > 1) throw new Error(`Codex config contains duplicate top-level ${key} assignments`);
+  if (matches.length > 1) throw new Error(`OpenCode config contains duplicate top-level ${key} assignments`);
   if (matches.length === 0) return undefined;
   const normalized = matches[0]!.replaceAll("_", "");
-  if (!/^\d+$/.test(normalized)) throw new Error(`${key} in Codex config must be a positive integer`);
+  if (!/^\d+$/.test(normalized)) throw new Error(`${key} in OpenCode config must be a positive integer`);
   const value = Number(normalized);
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${key} in Codex config must be a positive integer`);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${key} in OpenCode config must be a positive integer`);
   return value;
 }
 
@@ -351,7 +351,7 @@ function findTomlTable(lines: string[], tableName: string): TomlTableRange | und
   const matches = lines
     .map((line, index) => header.test(line) ? index : -1)
     .filter(index => index >= 0);
-  if (matches.length > 1) throw new Error(`Codex config contains duplicate [${tableName}] tables`);
+  if (matches.length > 1) throw new Error(`OpenCode config contains duplicate [${tableName}] tables`);
   const headerIndex = matches[0];
   if (headerIndex === undefined) return undefined;
   const relativeEnd = lines
@@ -401,7 +401,7 @@ function rawAssignmentInTable(
     if (match) matches.push({ present: true, rawLine: line, value: match[1]!, index });
   }
   if (matches.length > 1) {
-    throw new Error(`Codex config contains duplicate [${tableName}].${key} assignments`);
+    throw new Error(`OpenCode config contains duplicate [${tableName}].${key} assignments`);
   }
   return { ...(matches[0] ?? { present: false }), tablePresent: true, tableName };
 }
@@ -415,7 +415,7 @@ function findBooleanAssignmentInTable(
   if (!assignment.present) return assignment;
   const value = stripTomlComment(assignment.value!).trim();
   if (value !== "true" && value !== "false") {
-    throw new Error(`${key} in Codex [${tableName}] must be a boolean`);
+    throw new Error(`${key} in OpenCode [${tableName}] must be a boolean`);
   }
   return { ...assignment, value };
 }
@@ -432,11 +432,11 @@ export function findAgentMaxDepthAssignment(lines: string[]): PreviousAgentAssig
     if (!match) continue;
     const value = stripTomlComment(match[1]!).trim().replaceAll("_", "");
     if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < 1) {
-      throw new Error("max_depth in Codex [agents] must be a positive integer");
+      throw new Error("max_depth in OpenCode [agents] must be a positive integer");
     }
     matches.push({ present: true, rawLine: line, value, index });
   }
-  if (matches.length > 1) throw new Error("Codex config contains duplicate [agents].max_depth assignments");
+  if (matches.length > 1) throw new Error("OpenCode config contains duplicate [agents].max_depth assignments");
   return { ...(matches[0] ?? { present: false }), tablePresent: true };
 }
 
@@ -471,7 +471,7 @@ export function findMultiAgentV2Assignment(lines: string[]): PreviousFeatureAssi
   const table = findTomlTable(lines, "features.multi_agent_v2");
   if (rawScalar.present && table) {
     throw new Error(
-      "Codex config defines multi_agent_v2 as both [features] scalar and [features.multi_agent_v2] table",
+      "OpenCode config defines multi_agent_v2 as both [features] scalar and [features.multi_agent_v2] table",
     );
   }
   if (table) return findBooleanAssignmentInTable(lines, "features.multi_agent_v2", "enabled");
@@ -482,7 +482,7 @@ export function findMultiAgentV2Assignment(lines: string[]): PreviousFeatureAssi
     return { ...rawScalar, value: scalarValue };
   }
   const inline = parseInlineBooleanField(rawValue, "multi_agent_v2");
-  if (!inline) throw new Error("multi_agent_v2 in Codex [features] must be a boolean or inline table");
+  if (!inline) throw new Error("multi_agent_v2 in OpenCode [features] must be a boolean or inline table");
   return { ...rawScalar, value: inline.value, inlineTable: true };
 }
 
@@ -493,7 +493,7 @@ export function managedMultiAgentV2AssignmentLine(previous: PreviousFeatureAssig
       : MANAGED_MULTI_AGENT_V2_LINE;
   }
   if (!previous.rawLine) {
-    throw new Error("Codex integration journal is missing the prior multi_agent_v2 inline table");
+    throw new Error("OpenCode integration journal is missing the prior multi_agent_v2 inline table");
   }
   const prefix = /^\s*multi_agent_v2\s*=\s*/.exec(previous.rawLine);
   if (!prefix) throw new Error("Could not parse the prior multi_agent_v2 inline table");
@@ -540,7 +540,7 @@ export function installCompatibilityV1Features(text: string): {
   setScalarFeature(document, "multi_agent", MANAGED_MULTI_AGENT_LINE);
   if (previousMultiAgentV2.inlineTable) {
     if (previousMultiAgentV2.index === undefined) {
-      throw new Error("Codex [features].multi_agent_v2 inline table disappeared during setup");
+      throw new Error("OpenCode [features].multi_agent_v2 inline table disappeared during setup");
     }
     document.lines[previousMultiAgentV2.index] = managedMultiAgentV2AssignmentLine(previousMultiAgentV2);
   } else if (previousMultiAgentV2.tableName === "features.multi_agent_v2") {
@@ -553,7 +553,7 @@ export function installCompatibilityV1Features(text: string): {
       document.lines[current.index] = MANAGED_MULTI_AGENT_V2_TABLE_LINE;
     } else {
       const table = findTomlTable(document.lines, "features.multi_agent_v2");
-      if (!table) throw new Error("Codex [features.multi_agent_v2] table disappeared during setup");
+      if (!table) throw new Error("OpenCode [features.multi_agent_v2] table disappeared during setup");
       insertDocumentLine(document, table.endIndex, MANAGED_MULTI_AGENT_V2_TABLE_LINE);
     }
   } else {
@@ -578,7 +578,7 @@ function verifyInstalledBooleanFeature(
   const current = findFeatureAssignment(splitLines(text), key);
   if (current.value !== expectedValue || current.rawLine !== managedLine) {
     throw new Error(
-      `Codex [features].${key} changed after setup; refusing to overwrite the user's newer value`,
+      `OpenCode [features].${key} changed after setup; refusing to overwrite the user's newer value`,
     );
   }
 }
@@ -593,7 +593,7 @@ function verifyInstalledMultiAgentV2Feature(
       || current.value !== "false"
       || current.rawLine !== managedMultiAgentV2AssignmentLine(previous)) {
       throw new Error(
-        "Codex [features].multi_agent_v2 changed after setup; refusing to overwrite the user's newer value",
+        "OpenCode [features].multi_agent_v2 changed after setup; refusing to overwrite the user's newer value",
       );
     }
     return;
@@ -604,7 +604,7 @@ function verifyInstalledMultiAgentV2Feature(
       || current.value !== "false"
       || current.rawLine !== MANAGED_MULTI_AGENT_V2_LINE) {
       throw new Error(
-        "Codex [features].multi_agent_v2 changed after setup; refusing to overwrite the user's newer value",
+        "OpenCode [features].multi_agent_v2 changed after setup; refusing to overwrite the user's newer value",
       );
     }
     return;
@@ -612,13 +612,13 @@ function verifyInstalledMultiAgentV2Feature(
   const lines = splitLines(text);
   if (findFeatureAssignment(lines, "multi_agent_v2").present) {
     throw new Error(
-      "Codex [features].multi_agent_v2 changed after setup; refusing to overwrite the user's newer value",
+      "OpenCode [features].multi_agent_v2 changed after setup; refusing to overwrite the user's newer value",
     );
   }
   const current = findBooleanAssignmentInTable(lines, "features.multi_agent_v2", "enabled");
   if (current.value !== "false" || current.rawLine !== MANAGED_MULTI_AGENT_V2_TABLE_LINE) {
     throw new Error(
-      "Codex [features.multi_agent_v2].enabled changed after setup; refusing to overwrite the user's newer value",
+      "OpenCode [features.multi_agent_v2].enabled changed after setup; refusing to overwrite the user's newer value",
     );
   }
 }
@@ -633,17 +633,17 @@ export function restoreBooleanFeature(
   verifyInstalledBooleanFeature(text, key, expectedValue, managedLine);
   const document = parseDocument(text);
   const current = findFeatureAssignment(document.lines, key);
-  if (current.index === undefined) throw new Error(`Managed Codex ${key} is missing`);
+  if (current.index === undefined) throw new Error(`Managed OpenCode ${key} is missing`);
   if (previous.present) {
     if (!previous.rawLine) {
-      throw new Error(`Codex integration journal is missing the prior ${key} line`);
+      throw new Error(`OpenCode integration journal is missing the prior ${key} line`);
     }
     document.lines[current.index] = previous.rawLine;
   } else {
     removeDocumentLine(document, current.index);
     if (!previous.tablePresent) {
       const table = findTomlTable(document.lines, "features");
-      if (!table) throw new Error("Managed Codex [features] table is missing");
+      if (!table) throw new Error("Managed OpenCode [features] table is missing");
       const remaining = document.lines
         .slice(table.headerIndex + 1, table.endIndex)
         .filter(line => line.trim().length > 0);
@@ -666,11 +666,11 @@ export function restoreMultiAgentV2Feature(
   if (previous.inlineTable) {
     verifyInstalledMultiAgentV2Feature(text, previous);
     if (!previous.rawLine) {
-      throw new Error("Codex integration journal is missing the prior multi_agent_v2 inline table");
+      throw new Error("OpenCode integration journal is missing the prior multi_agent_v2 inline table");
     }
     const document = parseDocument(text);
     const current = findMultiAgentV2Assignment(document.lines);
-    if (current.index === undefined) throw new Error("Managed Codex multi_agent_v2 inline table is missing");
+    if (current.index === undefined) throw new Error("Managed OpenCode multi_agent_v2 inline table is missing");
     document.lines[current.index] = previous.rawLine;
     return renderDocument(document);
   }
@@ -690,10 +690,10 @@ export function restoreMultiAgentV2Feature(
     "features.multi_agent_v2",
     "enabled",
   );
-  if (current.index === undefined) throw new Error("Managed Codex multi_agent_v2.enabled is missing");
+  if (current.index === undefined) throw new Error("Managed OpenCode multi_agent_v2.enabled is missing");
   if (previous.present) {
     if (!previous.rawLine) {
-      throw new Error("Codex integration journal is missing the prior multi_agent_v2.enabled line");
+      throw new Error("OpenCode integration journal is missing the prior multi_agent_v2.enabled line");
     }
     document.lines[current.index] = previous.rawLine;
   } else {
@@ -729,7 +729,7 @@ export function verifyCompatibilityV1Features(
   if (depth.value !== String(installedAgentMaxDepth)
     || depth.rawLine !== managedAgentMaxDepthLine(installedAgentMaxDepth)) {
     throw new Error(
-      "Codex [agents].max_depth changed after Compatibility V1 setup; refusing to overwrite the user's newer value",
+      "OpenCode [agents].max_depth changed after Compatibility V1 setup; refusing to overwrite the user's newer value",
     );
   }
 }
@@ -764,17 +764,17 @@ export function restoreCompatibilityV1AgentDepth(
   verifyCompatibilityV1AgentDepth(text, installedAgentMaxDepth);
   const document = parseDocument(text);
   const current = findAgentMaxDepthAssignment(document.lines);
-  if (current.index === undefined) throw new Error("Managed Codex [agents].max_depth is missing");
+  if (current.index === undefined) throw new Error("Managed OpenCode [agents].max_depth is missing");
   if (previousAgentMaxDepth.present) {
     if (!previousAgentMaxDepth.rawLine) {
-      throw new Error("Codex integration journal is missing the prior [agents].max_depth line");
+      throw new Error("OpenCode integration journal is missing the prior [agents].max_depth line");
     }
     document.lines[current.index] = previousAgentMaxDepth.rawLine;
   } else {
     removeDocumentLine(document, current.index);
     if (!previousAgentMaxDepth.tablePresent) {
       const table = findTomlTable(document.lines, "agents");
-      if (!table) throw new Error("Managed Codex [agents] table is missing");
+      if (!table) throw new Error("Managed OpenCode [agents] table is missing");
       const remaining = document.lines
         .slice(table.headerIndex + 1, table.endIndex)
         .filter(line => line.trim().length > 0);
@@ -795,7 +795,7 @@ function verifyCompatibilityV1AgentDepth(text: string, installedAgentMaxDepth: n
   if (depth.value !== String(installedAgentMaxDepth)
     || depth.rawLine !== managedAgentMaxDepthLine(installedAgentMaxDepth)) {
     throw new Error(
-      "Codex [agents].max_depth changed after Compatibility V1 setup; refusing to overwrite the user's newer value",
+      "OpenCode [agents].max_depth changed after Compatibility V1 setup; refusing to overwrite the user's newer value",
     );
   }
 }

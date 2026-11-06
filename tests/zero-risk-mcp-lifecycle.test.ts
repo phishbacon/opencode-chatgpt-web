@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./../src/branding";
 import { afterAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -101,11 +102,11 @@ describe("Zero Risk turn broker lifecycle", () => {
       const [request] = await ownerBatch;
       expect(request).toMatchObject({ wireName: "exec_command", arguments: { cmd: "pwd" } });
       expect(() => broker.completeSafeTurn(requestId, "premature"))
-        .toThrow("1 pending Codex tool invocation");
+        .toThrow("1 pending OpenCode tool invocation");
       broker.completeTool(requestId, request!.callId, toolResult({ output: root }));
       await expect(invocation).resolves.toMatchObject({ structuredContent: { output: root } });
       expect(() => broker.completeSafeTurn(requestId, "activity still settling"))
-        .toThrow("1 active Codex MCP request");
+        .toThrow("1 active OpenCode MCP request");
       expect(logs.filter(line => line.includes("accepted safe completion"))).toEqual([]);
       await callTurnBroker(socketPath, {
         method: "activity_complete",
@@ -219,7 +220,7 @@ describe("Zero Risk turn broker lifecycle", () => {
       broker.confirmSafeTurnSent(requestId, nonceA);
       broker.requestCompaction(requestId, toolResult({ compact: true }));
       await expect(callTurnBroker(socketPath, { method: "claim", token: requestId, contract: "safe" }))
-        .rejects.toThrow("awaiting completion for Codex context compaction");
+        .rejects.toThrow("awaiting completion for OpenCode context compaction");
 
       const summary = broker.waitForSafeCompletion(requestId);
       expect(broker.completeSafeTurn(requestId, "complete compacted summary")).toEqual({
@@ -304,7 +305,7 @@ describe("Zero Risk public MCP ABI", () => {
         "codex_write_stdin",
       ]);
       expect(listed.tools.find(tool => tool.name === "codex_turn_start")?.description)
-        .toContain("request_id included in the pasted Codex Web GPT request");
+        .toContain(`request_id included in the pasted ${PRODUCT_NAME} request`);
       expect(listed.tools.find(tool => tool.name === "codex_tool_inventory")?.description)
         .toStartWith("List tools available to the connected Zero Risk request");
       const startSchema = listed.tools.find(tool => tool.name === "codex_turn_start")?.inputSchema;

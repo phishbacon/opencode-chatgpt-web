@@ -23,7 +23,7 @@ test("verbosity and JSON-schema controls survive parser-to-prompt transport", ()
   expect(parsed.options.verbosity).toBe("high");
   expect(parsed.options.outputFormat).toEqual({ type: "json_schema", name: "result", strict: true, schema });
   const compiled = compileChatGptWebPrompt(parsed, capabilities, turnToken);
-  expect(compiled.text).toContain("Codex requested high response verbosity.");
+  expect(compiled.text).toContain("OpenCode requested high response verbosity.");
   expect(compiled.text).toContain('strict JSON-schema final answer named "result"');
   expect(compiled.text).toContain(JSON.stringify(schema));
 });

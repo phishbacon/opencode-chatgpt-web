@@ -127,7 +127,7 @@ function sharedStore(cache?: string) {
   return new ChatGptThreadEnvironmentStore(cache, Date.now, primary, undefined, [secondary]);
 }
 
-describe("explicit trusted Codex homes (#851)", () => {
+describe("explicit trusted OpenCode homes (#851)", () => {
   test("a second native home is inaccessible until the operator registers it", () => {
     rollout(secondary);
     const parsed = request();
@@ -159,7 +159,7 @@ describe("explicit trusted Codex homes (#851)", () => {
 
   test("complete envelopes still require current native ownership", () => {
     const parsed = request({ mode: "danger-full-access" });
-    expect(() => sharedStore().resolve(parsed)).toThrow("No current native Codex task proof");
+    expect(() => sharedStore().resolve(parsed)).toThrow("No current native OpenCode task proof");
     rollout(secondary, { mode: "danger-full-access" });
     expect(sharedStore().resolve(parsed).sandboxPolicy).toEqual({ type: "dangerFullAccess" });
     expect(() => sharedStore().resolve(request({ mode: "danger-full-access", currentTurn: otherId })))
@@ -182,8 +182,8 @@ describe("explicit trusted Codex homes (#851)", () => {
     expect(store.resolve(request()).sandboxPolicy).toEqual({ type: "readOnly", networkAccess: false });
     expect(readFileSync(cache, "utf8")).toBe(original);
     rmSync(path);
-    expect(() => store.resolve(request({ envelope: false }))).toThrow("No current native Codex task proof");
-    expect(() => sharedStore(cache).resolve(request({ envelope: false }))).toThrow("No current native Codex task proof");
+    expect(() => store.resolve(request({ envelope: false }))).toThrow("No current native OpenCode task proof");
+    expect(() => sharedStore(cache).resolve(request({ envelope: false }))).toThrow("No current native OpenCode task proof");
     expect(readFileSync(cache, "utf8")).toBe(original);
     rollout(secondary);
     const freshCache = join(root, "new-cache.json");

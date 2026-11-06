@@ -44,7 +44,7 @@ function isInstalledInterruptHook(value: unknown): boolean {
 function parseJournal(path: string): AnyCodexIntegrationJournal {
   const value = JSON.parse(stripUtf8Bom(readFileSync(path, "utf8"))) as Record<string, unknown>;
   if (value.reconnectOnStartup !== undefined && (value.reconnectOnStartup !== true || value.active !== false)) {
-    throw new Error(`Invalid Codex route recovery intent: ${path}`);
+    throw new Error(`Invalid OpenCode route recovery intent: ${path}`);
   }
   const installed = value.installed as Record<string, unknown> | undefined;
   if (value.version === 10
@@ -135,7 +135,7 @@ function parseJournal(path: string): AnyCodexIntegrationJournal {
   if (value.version === 2 && value.installed && value.previous && typeof value.providerBlock === "string") {
     return value as unknown as LegacyCodexIntegrationJournal;
   }
-  throw new Error(`Invalid Codex integration journal: ${path}`);
+  throw new Error(`Invalid OpenCode integration journal: ${path}`);
 }
 function journalMatchesConfig(journal: AnyCodexIntegrationJournal): boolean {
   try {
@@ -175,7 +175,7 @@ export function readJournal(): AnyCodexIntegrationJournal | undefined {
   }
   if (recovery && !primary && !primaryError) {
     if (!journalMatchesConfig(recovery)) {
-      throw new Error("Codex integration recovery journal does not match the active config");
+      throw new Error("OpenCode integration recovery journal does not match the active config");
     }
     atomicWriteFile(primaryPath, serializeJournal(recovery));
     return recovery;
@@ -186,8 +186,8 @@ export function readJournal(): AnyCodexIntegrationJournal | undefined {
   if (primaryMatches === recoveryMatches) {
     throw new Error(
       primaryMatches
-        ? "Codex integration journal copies contain different baselines for the same config"
-        : "Codex integration journal copies do not match the active config",
+        ? "OpenCode integration journal copies contain different baselines for the same config"
+        : "OpenCode integration journal copies do not match the active config",
     );
   }
   const selected = primaryMatches ? primary! : recovery!;
@@ -209,7 +209,7 @@ export function assertJournalTargetsConfig(
   };
   if (pathIdentity(journal.configPath) !== pathIdentity(configPath)) {
     throw new Error(
-      `Codex integration journal belongs to ${journal.configPath}, not the active config ${configPath}`,
+      `OpenCode integration journal belongs to ${journal.configPath}, not the active config ${configPath}`,
     );
   }
 }

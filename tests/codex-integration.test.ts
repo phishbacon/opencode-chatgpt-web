@@ -61,8 +61,8 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe("reversible native Codex route integration", () => {
-  test("route install, update, switching and removal preserve a symlinked shared Codex config", () => {
+describe("reversible native OpenCode route integration", () => {
+  test("route install, update, switching and removal preserve a symlinked shared OpenCode config", () => {
     const { root, codexHome } = fixture();
     const shared = join(root, "shared");
     mkdirSync(shared, { mode: 0o750 });
@@ -129,7 +129,7 @@ describe("reversible native Codex route integration", () => {
     }
   });
 
-  test("expands a configured tilde Codex home consistently with launcher paths", () => {
+  test("expands a configured tilde OpenCode home consistently with launcher paths", () => {
     process.env.CODEX_HOME = "~/custom-codex-home";
     expect(getCodexHome()).toBe(join(homedir(), "custom-codex-home"));
   });
@@ -179,7 +179,7 @@ describe("reversible native Codex route integration", () => {
     expect(uninstallCodexIntegration()).toEqual({ changed: false });
   });
 
-  test("routes Codex without changing native compact or multi-agent feature flags", () => {
+  test("routes OpenCode without changing native compact or multi-agent feature flags", () => {
     const { codexHome } = fixture();
     const configPath = join(codexHome, "config.toml");
     const original = [
@@ -332,10 +332,10 @@ describe("reversible native Codex route integration", () => {
     const configPath = join(codexHome, "config.toml");
     writeFileSync(configPath, "[features]\nmulti_agent_v2 = { enabled = \"false\" }\n");
     expect(() => installCodexIntegration(compatibilityV1Config("browser-only")))
-      .toThrow("enabled in Codex [features].multi_agent_v2 inline table must be a boolean");
+      .toThrow("enabled in OpenCode [features].multi_agent_v2 inline table must be a boolean");
   });
 
-  test("explicit replacement adopts a Codex-migrated inline multi_agent_v2 value", () => {
+  test("explicit replacement adopts a OpenCode-migrated inline multi_agent_v2 value", () => {
     const { codexHome } = fixture();
     const configPath = join(codexHome, "config.toml");
     writeFileSync(
@@ -346,7 +346,7 @@ describe("reversible native Codex route integration", () => {
     installCodexIntegration(config);
     const migrated = readFileSync(configPath, "utf8").replace(
       MANAGED_MULTI_AGENT_V2_LINE,
-      'multi_agent_v2 = { enabled = true, hide_spawn_agent_metadata = true } # migrated by Codex',
+      'multi_agent_v2 = { enabled = true, hide_spawn_agent_metadata = true } # migrated by OpenCode',
     );
     writeFileSync(configPath, migrated);
 
@@ -355,14 +355,14 @@ describe("reversible native Codex route integration", () => {
     expect(journal.previousMultiAgentV2).toMatchObject({
       inlineTable: true,
       value: "true",
-      rawLine: 'multi_agent_v2 = { enabled = true, hide_spawn_agent_metadata = true } # migrated by Codex',
+      rawLine: 'multi_agent_v2 = { enabled = true, hide_spawn_agent_metadata = true } # migrated by OpenCode',
     });
     expect(readFileSync(configPath, "utf8")).toContain(
-      'multi_agent_v2 = { enabled = false, hide_spawn_agent_metadata = true } # migrated by Codex',
+      'multi_agent_v2 = { enabled = false, hide_spawn_agent_metadata = true } # migrated by OpenCode',
     );
     uninstallCodexIntegration();
     expect(readFileSync(configPath, "utf8")).toContain(
-      'multi_agent_v2 = { enabled = true, hide_spawn_agent_metadata = true } # migrated by Codex',
+      'multi_agent_v2 = { enabled = true, hide_spawn_agent_metadata = true } # migrated by OpenCode',
     );
   });
 
@@ -676,7 +676,7 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(configPath, "utf8")).toBe(original);
   });
 
-  test("explicit setup restores a removed hook without discarding the current Codex config", () => {
+  test("explicit setup restores a removed hook without discarding the current OpenCode config", () => {
     for (const ending of ["\n", "\r\n"]) {
       for (const keepRoute of [true, false]) {
         const { codexHome } = fixture();
@@ -885,14 +885,14 @@ describe("reversible native Codex route integration", () => {
     expect(readFileSync(configPath, "utf8")).toBe(changed);
   });
 
-  test("preflight detects route conflicts without changing Codex or creating a journal", () => {
+  test("preflight detects route conflicts without changing OpenCode or creating a journal", () => {
     const { codexHome } = fixture();
     const configPath = join(codexHome, "config.toml");
     const original = 'model = "gpt-5.6-sol"\nopenai_base_url = "http://127.0.0.1:9999/v1"\n';
     writeFileSync(configPath, original);
 
     expect(() => preflightCodexIntegration(nativeConfig("browser-only")))
-      .toThrow(/--replace-codex-route.*OpenCodex or Headroom/s);
+      .toThrow(/--replace-codex-route.*Codex or Headroom/s);
     expect(readFileSync(configPath, "utf8")).toBe(original);
     expect(() => readFileSync(getCodexJournalPath(), "utf8")).toThrow();
   });

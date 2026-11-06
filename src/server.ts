@@ -49,6 +49,16 @@ import {
 import { parseRequest } from "./responses/parser";
 import { expandPreviousResponseInput, flushResponseState, rememberResponseState } from "./responses/state";
 import { namespacedToolName, type AdapterEvent, type CodexParsedRequest } from "./types";
+import { OPENCODE_MODEL_PREFIX, verifyOpenCodeResponsesIngress } from "./opencode/request-auth";
+import { assertOpenCodeDevListenerConfig, guardOpenCodeDevHttpRequest,
+  type OpenCodeDevListenerOptions } from "./opencode/dev-listener";
+import { OpenCodeTurnVerifier, parseTurnSigningKey, type OpenCodeTurnClaims } from "./opencode/turn-binding";
+import { OpenCodeToolReceiptLedger } from "./opencode/tool-receipts";
+import {
+  consumeOpenCodeSessionDeletion, OPENCODE_SESSION_DELETED_HEADER,
+  OPENCODE_SESSION_DELETED_PATH,
+} from "./opencode/session-lifecycle";
+import { openCodeOwnerKey, type OpenCodeTurnOwner } from "./opencode/turn-binding";
 import type { CodexProviderConfig } from "./types";
 import type { ProviderAdapter } from "./adapters/base";
 import { VERSION } from "./version";
@@ -125,6 +135,7 @@ export class HttpTurnCounter {
     done: Promise<void>;
     finish: () => void;
     identity?: NativeCodexTurnIdentity;
+    openCode?: { sessionID: string; ownerKey: string };
   }>();
   private readonly interrupted = new Map<string, unknown>();
   private nextId = 1;
@@ -161,7 +172,7 @@ export class HttpTurnCounter {
 
   async cancelTurn(
     identity: NativeCodexTurnIdentity,
-    reason: unknown = new DOMException("Codex turn interrupted", "AbortError"),
+    reason: unknown = new DOMException("OpenCode turn interrupted", "AbortError"),
   ): Promise<number> {
     const cancellation = this.beginCancelTurn(identity, reason);
     await cancellation.settlement;
@@ -170,7 +181,7 @@ export class HttpTurnCounter {
 
   beginCancelTurn(
     identity: NativeCodexTurnIdentity,
-    reason: unknown = new DOMException("Codex turn interrupted", "AbortError"),
+    reason: unknown = new DOMException("OpenCode turn interrupted", "AbortError"),
   ): { cancelled: number; settlement: Promise<void> } {
     this.rememberInterrupted(identity, reason);
     const turns = [...this.active.values()].filter(turn => (
@@ -185,10 +196,23 @@ export class HttpTurnCounter {
     };
   }
 
+  /** Cancel only authenticated OpenCode HTTP streams matching the deleted owner. */
+  beginCancelOpenCodeSession(sessionID: string, owner: OpenCodeTurnOwner, reason: Error): {
+    cancelled: number; settlement: Promise<void>;
+  } {
+    const key = openCodeOwnerKey(owner);
+    const turns = [...this.active.values()].filter(turn => (
+      turn.openCode?.sessionID === sessionID && turn.openCode.ownerKey === key
+    ));
+    for (const turn of turns) if (!turn.abort.signal.aborted) turn.abort.abort(reason);
+    return { cancelled: turns.length, settlement: Promise.all(turns.map(turn => turn.done)).then(() => undefined) };
+  }
+
   async track(
     run: (
       signal: AbortSignal,
       bindIdentity: (identity: NativeCodexTurnIdentity) => void,
+      bindOpenCodeSession: (sessionID: string, owner: OpenCodeTurnOwner) => void,
     ) => Promise<Response>,
     clientSignal?: AbortSignal,
     platform: NodeJS.Platform = process.platform,
@@ -203,6 +227,7 @@ export class HttpTurnCounter {
       done: Promise<void>;
       finish: () => void;
       identity?: NativeCodexTurnIdentity;
+      openCode?: { sessionID: string; ownerKey: string };
     } = { abort, done, finish };
     this.active.set(id, tracked);
     let released = false;
@@ -226,15 +251,21 @@ export class HttpTurnCounter {
     try {
       const response = await run(abort.signal, identity => {
         if (!identity.threadId.trim() || !identity.turnId.trim()) {
-          throw new Error("Native Codex turn identity must contain a threadId and turnId");
+          throw new Error("Native OpenCode turn identity must contain a threadId and turnId");
         }
         if (tracked.identity
           && (tracked.identity.threadId !== identity.threadId || tracked.identity.turnId !== identity.turnId)) {
-          throw new Error("An HTTP request cannot change its native Codex turn identity");
+          throw new Error("An HTTP request cannot change its native OpenCode turn identity");
         }
         tracked.identity = identity;
         const interruptedReason = this.interrupted.get(this.identityKey(identity));
         if (interruptedReason !== undefined && !abort.signal.aborted) abort.abort(interruptedReason);
+      }, (sessionID, owner) => {
+        const key = openCodeOwnerKey(owner);
+        if (tracked.openCode && (tracked.openCode.sessionID !== sessionID || tracked.openCode.ownerKey !== key)) {
+          throw new Error("An HTTP request cannot change its authenticated OpenCode session owner");
+        }
+        tracked.openCode = { sessionID, ownerKey: key };
       });
       if (!response.body) {
         release();
@@ -354,7 +385,9 @@ export class HttpTurnCounter {
   }
 }
 
-type ChatGptWebAdapterFactory = (provider: CodexProviderConfig) => ProviderAdapter;
+type ChatGptWebAdapterFactory = (provider: CodexProviderConfig, dependencies?: {
+  openCodeToolReceipts?: OpenCodeToolReceiptLedger;
+}) => ProviderAdapter;
 
 export interface ResponseRequestOptions {
   /** DEV and other in-process harnesses can keep continuation state in their own canonical store. */
@@ -363,6 +396,12 @@ export interface ResponseRequestOptions {
   onAdapterEvent?: (event: AdapterEvent) => void;
   /** Bind the physical HTTP stream to the exact native Codex turn that owns it. */
   onTurnIdentity?: (identity: NativeCodexTurnIdentity) => void;
+  /** Preserve verified OpenCode owner through HTTP cancellation without matching Codex IDs. */
+  onOpenCodeSession?: (sessionID: string, owner: OpenCodeTurnOwner) => void;
+  /** OpenCode requests use trusted hook signatures, independent of Codex metadata. */
+  openCodeTurnVerifier?: OpenCodeTurnVerifier;
+  /** OpenCode tool results require receipts issued by its future trusted website broker. */
+  openCodeToolReceipts?: OpenCodeToolReceiptLedger;
 }
 
 export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppConfig): ChatGptWebModelRoute {
@@ -375,6 +414,37 @@ export function routeChatGptWebRequest(parsed: CodexParsedRequest, config: AppCo
   parsed.options.reasoning = route.interactionMode === "automatic"
     ? route.adapterEffort
     : route.codexEffort;
+  return route;
+}
+
+/**
+ * The original Codex bridge receives `chatgpt-web/*` models and Codex-owned
+ * rollout identity. OpenCode publishes its own provider prefix, and only a
+ * verified OpenCode hook may attach the private owner before browser routing.
+ */
+export function routeOpenCodeBrowserRequest(
+  parsed: CodexParsedRequest,
+  claims: OpenCodeTurnClaims,
+  config: AppConfig,
+): ChatGptWebModelRoute {
+  if (parsed.modelId !== claims.model || !claims.model.startsWith(OPENCODE_MODEL_PREFIX)) {
+    throw new Error("OpenCode browser model must match authenticated turn identity");
+  }
+  const suffix = claims.model.slice(OPENCODE_MODEL_PREFIX.length);
+  if (!/^[a-z0-9][a-z0-9.-]{0,100}$/.test(suffix)) {
+    throw new Error("OpenCode browser model slug is invalid");
+  }
+  // The upstream catalog remains the authority for enabled models and effort.
+  parsed.modelId = `chatgpt-web/${suffix}`;
+  const route = routeChatGptWebRequest(parsed, config);
+  if (route.interactionMode !== "automatic") {
+    throw new Error("OpenCode requires automatic browser interaction");
+  }
+  Object.defineProperty(parsed, "_openCodeTurn", {
+    value: Object.freeze({ ...claims, owner: Object.freeze({ ...claims.owner }) }),
+    configurable: false,
+    writable: false,
+  });
   return route;
 }
 
@@ -589,7 +659,7 @@ async function nativeImagesRequest(
 ): Promise<Response> {
   const authorization = req.headers.get("authorization") ?? "";
   if (!authorization.startsWith("Bearer ") || authorization.length <= "Bearer ".length) {
-    return formatErrorResponse(401, "authentication_error", "Native image requests require incoming Codex Bearer authorization");
+    return formatErrorResponse(401, "authentication_error", "Native image requests require incoming OpenCode Bearer authorization");
   }
   try {
     return await forwardNativeCodexRequest(req, endpoint, fetchUpstream);
@@ -634,15 +704,35 @@ export async function responseRequest(
   const requestedModel = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { model?: unknown }).model
     : undefined;
+  let verifiedOpenCodeTurn: OpenCodeTurnClaims | undefined;
   try {
-    const identity = extractCodexTurnIdentityFromBody(raw);
-    if (identity.threadId && identity.turnId) {
-      options.onTurnIdentity?.({ threadId: identity.threadId, turnId: identity.turnId });
+    verifiedOpenCodeTurn = verifyOpenCodeResponsesIngress(req, raw, options.openCodeTurnVerifier,
+      { consume: false, receipts: options.openCodeToolReceipts });
+    if (verifiedOpenCodeTurn) {
+      try {
+        const openCodeParsed = parseRequest(raw);
+        if (openCodeParsed._compactionRequest) {
+          return formatErrorResponse(501, "invalid_request_error", "OpenCode compaction lifecycle is not yet configured");
+        }
+        routeOpenCodeBrowserRequest(openCodeParsed, verifiedOpenCodeTurn, config);
+      } catch (error) {
+        return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
+      }
     }
   } catch (error) {
-    return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
+    return formatErrorResponse(401, "authentication_error", error instanceof Error ? error.message : String(error));
   }
-  if (typeof requestedModel === "string" && !isChatGptWebModelSlug(requestedModel)) {
+  if (!verifiedOpenCodeTurn) {
+    try {
+      const identity = extractCodexTurnIdentityFromBody(raw);
+      if (identity.threadId && identity.turnId) {
+        options.onTurnIdentity?.({ threadId: identity.threadId, turnId: identity.turnId });
+      }
+    } catch (error) {
+      return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!verifiedOpenCodeTurn && typeof requestedModel === "string" && !isChatGptWebModelSlug(requestedModel)) {
     try {
       return await forwardNativeCodexRequest(nativeRequest, "responses", undefined, raw);
     } catch (error) {
@@ -652,18 +742,31 @@ export async function responseRequest(
   const requestedPreviousResponseId = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { previous_response_id?: unknown }).previous_response_id
     : undefined;
-  const expanded = expandPreviousResponseInput(raw);
-  const prediction = isCodexComposerPrediction(raw);
+  // Codex may reconstruct native previous_response_id state. OpenCode's signed
+  // provider request instead carries its canonical input and receipt history.
+  const expanded = verifiedOpenCodeTurn ? raw : expandPreviousResponseInput(raw);
+  const prediction = !verifiedOpenCodeTurn && isCodexComposerPrediction(raw);
   let executionConfig = config;
   let parsed: CodexParsedRequest;
   let route: ChatGptWebModelRoute;
   try {
     parsed = parseRequest(expanded);
     if (prediction) executionConfig = configureComposerPrediction(parsed, config);
-    route = routeChatGptWebRequest(parsed, executionConfig);
-    const identity = extractChatGptTurnIdentity(parsed);
-    if (identity.threadId && identity.turnId) {
-      options.onTurnIdentity?.({ threadId: identity.threadId, turnId: identity.turnId });
+    route = verifiedOpenCodeTurn
+      ? routeOpenCodeBrowserRequest(parsed, verifiedOpenCodeTurn, executionConfig)
+      : routeChatGptWebRequest(parsed, executionConfig);
+    if (verifiedOpenCodeTurn) {
+      // Validate before consuming the one-use signature and receipt results.
+      // No await occurs between this commit and browser ownership assignment.
+      verifyOpenCodeResponsesIngress(req, raw, options.openCodeTurnVerifier,
+        { receipts: options.openCodeToolReceipts });
+      options.onOpenCodeSession?.(verifiedOpenCodeTurn.sessionID, verifiedOpenCodeTurn.owner);
+      options.onTurnIdentity?.({ threadId: verifiedOpenCodeTurn.sessionID, turnId: verifiedOpenCodeTurn.turnNonce });
+    } else {
+      const identity = extractChatGptTurnIdentity(parsed);
+      if (identity.threadId && identity.turnId) {
+        options.onTurnIdentity?.({ threadId: identity.threadId, turnId: identity.turnId });
+      }
     }
   } catch (error) {
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
@@ -680,7 +783,7 @@ export async function responseRequest(
     return formatErrorResponse(
       409,
       "invalid_request_error",
-      "Local continuation state for previous_response_id is unavailable; refusing to run ChatGPT Web with partial Codex context. Compact the Codex task or start a new task before retrying.",
+      "Local continuation state for previous_response_id is unavailable; refusing to run ChatGPT Web with partial OpenCode context. Compact the OpenCode task or start a new task before retrying.",
     );
   }
 
@@ -697,6 +800,7 @@ export async function responseRequest(
   const compaction = parsed._compactionRequest === true;
   const compactionItem = compaction && parsed._compactionResponseFormat !== "message";
   const rememberCompletedResponse = (response: Record<string, unknown>): void => {
+    if (verifiedOpenCodeTurn) return; // OpenCode owns canonical history and compaction.
     if (!compaction) {
       if (options.rememberState !== false) rememberResponseState(parsed._rawBody, response, { force: true });
       return;
@@ -732,7 +836,7 @@ export async function responseRequest(
     return formatErrorResponse(
       409,
       "invalid_request_error",
-      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate Codex compaction is disabled for this route.",
+      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate OpenCode compaction is disabled for this route.",
     );
   }
   if (compaction) {
@@ -761,7 +865,7 @@ export async function responseRequest(
       // allowing Codex to retry it as an upstream 502.
       return formatErrorResponse(400, "invalid_request_error", message);
     }
-    if (!message.includes("requires native Codex turn_id metadata")
+    if (!message.includes("requires native OpenCode turn_id metadata")
       && !message.includes("requires a current-turn user message")) throw error;
   }
   const cancelledError = traceId ? chatGptTurnSessions.cancelledError(traceId) : undefined;
@@ -781,7 +885,9 @@ export async function responseRequest(
       headers: { "content-type": "application/json" },
     });
   }
-  const adapter = adapterFactory(provider);
+  const adapter = adapterFactory(provider, verifiedOpenCodeTurn
+    ? { openCodeToolReceipts: options.openCodeToolReceipts }
+    : undefined);
   const queue = new AsyncEventQueue<AdapterEvent>();
   const abort = new AbortController();
   if (req.signal.aborted) abort.abort();
@@ -849,7 +955,7 @@ export async function compactRequest(
   req: Request,
   config: AppConfig,
   adapterFactory: ChatGptWebAdapterFactory = createChatGptWebAdapter,
-  options: Pick<ResponseRequestOptions, "onTurnIdentity"> = {},
+  options: Pick<ResponseRequestOptions, "onTurnIdentity" | "openCodeTurnVerifier" | "openCodeToolReceipts"> = {},
 ): Promise<Response> {
   const nativeRequest = req.clone();
   let raw: Record<string, unknown>;
@@ -863,6 +969,17 @@ export async function compactRequest(
       "invalid_request_error",
       error instanceof Error ? error.message : "Compaction request body must be a JSON object",
     );
+  }
+  try {
+    const verifiedOpenCodeTurn = verifyOpenCodeResponsesIngress(req, raw, options.openCodeTurnVerifier,
+      { consume: false, receipts: options.openCodeToolReceipts });
+    if (verifiedOpenCodeTurn) {
+      // OpenCode compaction cannot inherit the Codex native turn context.
+      // A verified OpenCode owner needs a dedicated trusted lifecycle route.
+      return formatErrorResponse(501, "invalid_request_error", "OpenCode browser-turn routing is not yet configured");
+    }
+  } catch (error) {
+    return formatErrorResponse(401, "authentication_error", error instanceof Error ? error.message : String(error));
   }
   const headerTurnMetadata = req.headers.get("x-codex-turn-metadata");
   if (headerTurnMetadata) {
@@ -908,7 +1025,7 @@ export async function compactRequest(
     return formatErrorResponse(
       409,
       "invalid_request_error",
-      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate Codex compaction is disabled for this route.",
+      "ChatGPT Web Luna uses a rolling checkpoint on every completed browser turn; separate OpenCode compaction is disabled for this route.",
     );
   }
   const input = Array.isArray(raw.input) ? raw.input : [];
@@ -968,20 +1085,21 @@ export function startServer(
     fetchUpstream?: NativeFetch;
     adapterFactory?: ChatGptWebAdapterFactory;
     modelCatalogFetches?: ModelCatalogFetches;
+    openCodeTurnVerifier?: OpenCodeTurnVerifier;
+    openCodeToolReceipts?: OpenCodeToolReceiptLedger;
+    openCodeSessionDeletionKey?: Buffer;
+    /** Explicitly opt in to a restricted Responses listener for an isolated OpenCode DEV profile. */
+    openCodeDevListener?: OpenCodeDevListenerOptions;
   } = {},
 ): ReturnType<typeof Bun.serve> {
-  if (config.purpose === "dev-harness") {
+  if (config.purpose === "dev-harness" && !dependencies.openCodeDevListener) {
     throw new Error("DEV harness configuration cannot start a Responses listener");
+  }
+  if (dependencies.openCodeDevListener) {
+    assertOpenCodeDevListenerConfig(config, dependencies.openCodeDevListener);
   }
   const startedAt = Date.now();
   const turnBroker = config.mode === "full" ? TurnBroker.forSocket(config.brokerSocketPath) : undefined;
-  if (config.mode === "full") {
-    void turnBroker!.listen().catch(error => {
-      console.error(
-        `[chatgpt-web] turn broker endpoint is unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
-  }
   let draining = false;
   let shutdownPromise: Promise<void> | undefined;
   let successfulModelCatalogRequests = 0;
@@ -992,6 +1110,29 @@ export function startServer(
   } | null = null;
   const httpTurns = new HttpTurnCounter();
   const modelCatalogFetches = dependencies.modelCatalogFetches ?? new ModelCatalogFetches();
+  const openCodeTurnVerifier = dependencies.openCodeTurnVerifier ?? (
+    !dependencies.openCodeDevListener && process.env.OPENCODE_CHATGPT_WEB_TURN_KEY
+      ? new OpenCodeTurnVerifier(parseTurnSigningKey(process.env.OPENCODE_CHATGPT_WEB_TURN_KEY))
+      : undefined
+  );
+  const openCodeToolReceipts = dependencies.openCodeToolReceipts ?? new OpenCodeToolReceiptLedger();
+  const openCodeSessionDeletionKey = dependencies.openCodeSessionDeletionKey ?? (
+    !dependencies.openCodeDevListener && process.env.OPENCODE_CHATGPT_WEB_TURN_KEY
+      ? parseTurnSigningKey(process.env.OPENCODE_CHATGPT_WEB_TURN_KEY) : undefined
+  );
+  if (dependencies.openCodeDevListener && (!openCodeTurnVerifier || !openCodeSessionDeletionKey)) {
+    throw new Error("OpenCode DEV listener requires a signed turn and session deletion key");
+  }
+  if (config.mode === "full") {
+    void turnBroker!.listen().catch(error => {
+      console.error(
+        `[chatgpt-web] turn broker endpoint is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+  // Duplicate deliveries of one authenticated notice wait for the same cleanup.
+  // Never report success after a failed physical browser release.
+  const openCodeDeletionSettlements = new Map<string, Promise<Response>>();
   const activity = () => ({
     active_http_turns: httpTurns.count(),
     active_browser_turns: chatGptTurnSessions.activeCount() + (turnBroker?.externalOwnerActiveCount() ?? 0),
@@ -1008,6 +1149,12 @@ export function startServer(
     idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url);
+      if (dependencies.openCodeDevListener) {
+        const rejected = await guardOpenCodeDevHttpRequest(
+          req, openCodeTurnVerifier!, openCodeToolReceipts, openCodeSessionDeletionKey!,
+        );
+        if (rejected) return rejected;
+      }
       // Loopback is reachable from any web page, cross-site or same-origin after DNS rebinding,
       // and this route has no bearer secret. Browsers attach Origin to every such request that
       // can start or control work; Codex and the launcher are not browsers and never send it.
@@ -1015,7 +1162,7 @@ export function startServer(
         return formatErrorResponse(
           403,
           "invalid_request_error",
-          "Browser-originated requests are not accepted by the local Codex route",
+          "Browser-originated requests are not accepted by the local OpenCode route",
         );
       }
       if (req.method === "GET" && url.pathname === "/healthz") {
@@ -1034,6 +1181,42 @@ export function startServer(
           last_model_catalog_result: lastModelCatalogResult,
           ...activity(),
         });
+      }
+      if (req.method === "POST" && url.pathname === OPENCODE_SESSION_DELETED_PATH) {
+        if (!openCodeTurnVerifier || !openCodeSessionDeletionKey) return new Response("Not configured", { status: 503 });
+        let identity: { sessionID: string; owner: OpenCodeTurnOwner; firstReceipt: boolean };
+        try {
+          identity = consumeOpenCodeSessionDeletion(
+            req.headers.get(OPENCODE_SESSION_DELETED_HEADER) ?? "",
+            openCodeSessionDeletionKey, openCodeTurnVerifier,
+          );
+        } catch (error) {
+          return Response.json({ status: "error", error: error instanceof Error ? error.message : String(error) },
+            { status: 401 });
+        }
+        if (!identity.firstReceipt) {
+          const previous = openCodeDeletionSettlements.get(identity.sessionID);
+          if (!previous) return new Response("OpenCode session deletion state unavailable", { status: 500 });
+          return previous.then(response => response.clone());
+        }
+        const cleanup = (async (): Promise<Response> => {
+          const reason = new DOMException("OpenCode session deleted", "AbortError");
+          const browserRetirement = chatGptTurnSessions.retireDeletedOpenCodeSessionAndWait(identity.sessionID, identity.owner);
+          const httpRetirement = httpTurns.beginCancelOpenCodeSession(identity.sessionID, identity.owner, reason);
+          const results = await Promise.allSettled([browserRetirement, httpRetirement.settlement]);
+          // Tombstone is committed before async cleanup; discard receipts after settlement.
+          openCodeToolReceipts.retireSession(identity.sessionID);
+          const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+          if (failed) {
+            console.error(`[opencode-chatgpt-web] deleted session cleanup failed: ${failed.reason instanceof Error ? failed.reason.message : String(failed.reason)}`);
+            return Response.json({ status: "error", error: "OpenCode session retired; browser cleanup failed" }, { status: 500 });
+          }
+          return Response.json({ status: "ok", retired_session: identity.sessionID,
+            retired_browser_turns: (results[0] as PromiseFulfilledResult<number>).value,
+            cancelled_http_turns: httpRetirement.cancelled });
+        })();
+        openCodeDeletionSettlements.set(identity.sessionID, cleanup);
+        return cleanup.then(response => response.clone());
       }
       if (req.method === "POST" && (url.pathname === "/admin/drain" || url.pathname === "/admin/resume")) {
         if (!controlAuthorized(req)) return new Response("Unauthorized", { status: 401 });
@@ -1097,7 +1280,7 @@ export function startServer(
           const threadId = typeof body?.threadId === "string" ? body.threadId.trim() : "";
           const turnId = typeof body?.turnId === "string" ? body.turnId.trim() : "";
           if (!/^[A-Za-z0-9_-]{6,128}$/.test(threadId) || !/^[A-Za-z0-9_-]{6,128}$/.test(turnId)) {
-            throw new Error("native Codex threadId or turnId is invalid");
+            throw new Error("native OpenCode threadId or turnId is invalid");
           }
           identity = { threadId, turnId };
         } catch (error) {
@@ -1106,7 +1289,7 @@ export function startServer(
             { status: 400 },
           );
         }
-        const reason = new DOMException("Codex turn interrupted", "AbortError");
+        const reason = new DOMException("OpenCode turn interrupted", "AbortError");
         const browserCancellation = chatGptTurnSessions.cancelNativeTurn(
           identity.threadId,
           identity.turnId,
@@ -1239,11 +1422,12 @@ export function startServer(
       if (req.method === "POST" && url.pathname === "/v1/responses") {
         if (draining) return formatErrorResponse(503, "server_error", "codex-chatgpt-web is draining for a requested service operation");
         return httpTurns.track(
-          (signal, bindIdentity) => responseRequest(
+          (signal, bindIdentity, bindOpenCodeSession) => responseRequest(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity },
+            { onTurnIdentity: bindIdentity, onOpenCodeSession: bindOpenCodeSession,
+              openCodeTurnVerifier, openCodeToolReceipts },
           ),
           req.signal,
           process.platform,
@@ -1257,7 +1441,7 @@ export function startServer(
             new Request(req, { signal }),
             config,
             dependencies.adapterFactory,
-            { onTurnIdentity: bindIdentity },
+            { onTurnIdentity: bindIdentity, openCodeTurnVerifier, openCodeToolReceipts },
           ),
           req.signal,
           process.platform,

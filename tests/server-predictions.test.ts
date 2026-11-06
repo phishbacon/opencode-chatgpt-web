@@ -54,7 +54,7 @@ test("prediction policy uses Sol 6 Medium, keeps history/schema, and never expos
   }
 });
 
-test("the prediction response also reaches Codex through the normal SSE completion", async () => {
+test("the prediction response also reaches OpenCode through the normal SSE completion", async () => {
   const { response, text } = await send({ ...base, stream: true });
   expect(response.status).toBe(200);
   const completed = text.split("\n").find(line => line.startsWith('data: {"type":"response.completed"'))!;

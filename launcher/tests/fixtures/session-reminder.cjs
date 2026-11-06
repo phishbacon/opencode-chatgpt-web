@@ -40,7 +40,7 @@ app.whenReady().then(async () => {
     },
   });
   ipcMain.handle("launcher:snapshot", () => ({ state, browser, version: "fixture", platform: process.platform,
-    profile: "production", connectorNames: { automatic: "Codex", manual: "Codex Zero Risk" },
+    profile: "production", connectorNames: { automatic: "OpenCode", manual: "OpenCode Zero Risk" },
     logs: [], operation: null, update: { status: "up-to-date" }, urls: {},
   }));
   ipcMain.handle("launcher:limits", () => ({ enabled: false, windows: [] }));

@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./branding";
 import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -41,9 +42,11 @@ import {
 import { connectTunnel, createTunnelConfig, installRuntimeKey, installRuntimeKeyBytes, installTunnelClient, managedRuntimeKeyPath, stopTunnel, waitForTunnelReady } from "./tunnel";
 import { getTunnelServiceStatus, installTunnelService, restartTunnelService, stopTunnelService, tunnelServiceDefinitionMatches, uninstallTunnelService } from "./tunnel-service";
 import { VERSION } from "./version";
+import { openCodeWebsiteConnectorName, type WebsiteMcpContract } from "./opencode/website-connector";
 
 export interface SetupOptions {
   connectorNameSuffix?: string;
+  websiteMcpContract?: WebsiteMcpContract;
   mode: RuntimeMode;
   browserInteractionMode?: BrowserInteractionMode;
   subagentProtocol?: SubagentProtocol;
@@ -141,6 +144,7 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
     manualAppName: before.manualAppName,
     browserHost: before.browserHost,
     browserInteractionMode: before.browserInteractionMode,
+    websiteMcpContract: before.websiteMcpContract,
     browserHostDescriptorPath: before.browserHostDescriptorPath,
     chromeExecutablePath: before.chromeExecutablePath,
     storageStatePath: before.storageStatePath,
@@ -173,6 +177,7 @@ function meaningfulRuntimeChange(before: AppConfig, after: AppConfig): boolean {
     manualAppName: after.manualAppName,
     browserHost: after.browserHost,
     browserInteractionMode: after.browserInteractionMode,
+    websiteMcpContract: after.websiteMcpContract,
     browserHostDescriptorPath: after.browserHostDescriptorPath,
     chromeExecutablePath: after.chromeExecutablePath,
     storageStatePath: after.storageStatePath,
@@ -202,6 +207,7 @@ export function tunnelWorkerRuntimeChanged(before: AppConfig | undefined, after:
     || JSON.stringify(before.runtimeCommand) !== JSON.stringify(after.runtimeCommand)
     || before.brokerSocketPath !== after.brokerSocketPath
     || before.browserInteractionMode !== after.browserInteractionMode
+    || before.websiteMcpContract !== after.websiteMcpContract
     || JSON.stringify(before.tunnel) !== JSON.stringify(after.tunnel);
 }
 
@@ -276,12 +282,24 @@ function baseConfig(
   const config = existing ? structuredClone(existing) : defaultConfig(options.mode);
   config.mode = options.mode;
   if (options.browserInteractionMode) config.browserInteractionMode = options.browserInteractionMode;
-  Object.assign(config, resolveInteractionConnectorIdentities(
-    config.browserInteractionMode,
-    profile,
-    existing,
-    options.connectorNameSuffix,
-  ));
+  if (options.websiteMcpContract) config.websiteMcpContract = options.websiteMcpContract;
+  if (config.websiteMcpContract === "opencode") {
+    if (config.mode !== "full" || config.browserInteractionMode !== "automatic") {
+      throw new Error("OpenCode website tools require full mode and automatic browser interaction");
+    }
+    if (options.connectorNameSuffix !== undefined) {
+      throw new Error("OpenCode website tools use a fixed connector name; --connector-name-suffix is unavailable");
+    }
+    config.appName = openCodeWebsiteConnectorName(profile);
+    config.automaticAppName = openCodeWebsiteConnectorName(profile);
+  } else {
+    Object.assign(config, resolveInteractionConnectorIdentities(
+      config.browserInteractionMode,
+      profile,
+      existing,
+      options.connectorNameSuffix,
+    ));
+  }
   if (options.subagentProtocol) config.subagentProtocol = options.subagentProtocol;
   config.releaseVersion = VERSION;
   config.runtimeCommand = currentRuntimeCommand();
@@ -335,7 +353,7 @@ function baseConfig(
       throw new Error("Zero Risk does not support Bigger Context");
     }
     if (config.mode !== "full") {
-      throw new Error("Zero Risk requires --full so Codex Zero Risk can signal start, tools, and completion");
+      throw new Error("Zero Risk requires --full so OpenCode Zero Risk can signal start, tools, and completion");
     }
     if (config.browserHost !== "launcher") {
       throw new Error("Zero Risk requires the Launcher; pass --browser-host-descriptor from the running Launcher");
@@ -470,7 +488,7 @@ async function bootstrapTunnelProfile(config: AppConfig): Promise<void> {
 function prepareSetup(options: SetupOptions): PreparedSetup {
   const existing = loadExistingConfig();
   if (existing?.purpose === DEV_CONFIG_PURPOSE) {
-    throw new Error("A DEV harness configuration cannot be installed into Codex");
+    throw new Error("A DEV harness configuration cannot be installed into OpenCode");
   }
   const config = baseConfig(existing, {
     ...options,
@@ -482,7 +500,7 @@ function prepareSetup(options: SetupOptions): PreparedSetup {
   if (!launcherOwned && process.platform !== "darwin") {
     throw new Error(
       "Terminal-only managed Chrome setup currently requires macOS. "
-      + "Use the Codex Web GPT launcher on Windows or Linux.",
+      + `Use the ${PRODUCT_NAME} launcher on Windows or Linux.`,
     );
   }
   return { existing, config, launcherOwned };
@@ -541,7 +559,7 @@ export async function setup(options: SetupOptions): Promise<SetupResult> {
     if (!options.restartService) {
       throw new Error(
         "Launcher ownership migration must stop the legacy background service. "
-        + "Retry from the launcher after the active Codex task finishes.",
+        + "Retry from the launcher after the active OpenCode task finishes.",
       );
     }
   }
@@ -606,7 +624,7 @@ export async function setup(options: SetupOptions): Promise<SetupResult> {
   const preliminaryChange = Boolean(existing && (meaningfulRuntimeChange(existing, config) || explicitTunnelChange || options.forceLogin));
   if (beforeService.loaded && preliminaryChange && !options.restartService) {
     throw new Error(
-      "The daemon is currently serving a Codex task and setup would change its runtime. "
+      "The daemon is currently serving a OpenCode task and setup would change its runtime. "
       + "Rerun from a normal terminal with --restart-service after the active task finishes.",
     );
   }
@@ -616,7 +634,7 @@ export async function setup(options: SetupOptions): Promise<SetupResult> {
   const changedWhileLoaded = Boolean(existing && beforeService.loaded && meaningfulRuntimeChange(existing, config));
   if (changedWhileLoaded && !options.restartService) {
     throw new Error(
-      "The daemon is currently serving a Codex task and setup would change its runtime. "
+      "The daemon is currently serving a OpenCode task and setup would change its runtime. "
       + "Rerun from a normal terminal with --restart-service after the active task finishes.",
     );
   }

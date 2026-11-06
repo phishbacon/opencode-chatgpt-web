@@ -17,7 +17,7 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("Think buttons do not require
       '<button type="button" aria-pressed="false">Think</button>',
       '<button type="button" aria-pressed="false" aria-label="Think"><svg><use href="#brain"/></svg></button>',
     ]) {
-      await page.setContent(`<form><div id="prompt-textarea" contenteditable="true"><span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span></div>
+      await page.setContent(`<form><div id="prompt-textarea" contenteditable="true"><span data-id="plugin:fixture" data-keyword="OpenCode Native2" contenteditable="false">OpenCode Native2</span></div>
         <button type="button" aria-pressed="false">Search</button>
         <button type="button" aria-pressed="false">Think harder</button>
         <button type="button" aria-pressed="false" hidden>Think</button>
@@ -60,7 +60,7 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("Think buttons do not require
     await page.locator('#controls button').evaluate(button => button.remove());
     await expect(setChatGptThinkMode(page.locator("#prompt-textarea"), true)).rejects.toThrow();
     expect(await page.evaluate(() => (window as any).actions)).toEqual(["click", "click", "click"]);
-    expect(await page.locator("#prompt-textarea").innerText()).toBe("Codex Native2");
+    expect(await page.locator("#prompt-textarea").innerText()).toBe("OpenCode Native2");
   } finally { await browser.close(); }
 }, 15_000);
 
@@ -69,7 +69,7 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("Think preserves both plugin 
   try {
     const page = await browser.newPage();
     for (const { markup, identity, replacement } of [
-      { markup: '<span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span>',
+      { markup: '<span data-id="plugin:fixture" data-keyword="OpenCode Native2" contenteditable="false">OpenCode Native2</span>',
         identity: "data-id", replacement: "plugin:other" },
       // Captured from the Free account composer on 2026-10-14. The display name
       // is visible text but belongs to the plugin, not to the user's prompt.
@@ -174,7 +174,7 @@ test.skipIf(!process.env.LAUNCHER_TEST_ELECTRON)("captured Think toggles indepen
     for (const fixture of ["chatgpt-composer-think.html", "chatgpt-composer-think-2026-10-11.html", "chatgpt-composer-think-2026-10-28.html"]) {
       const captured = readFileSync(new URL(`./fixtures/${fixture}`, import.meta.url), "utf8");
       for (const label of ["Think", "思考", "Думать", "생각하기", "التفكير", "Unknown future translation"]) {
-        await page.setContent(`<form data-chatgpt-composer><div id="prompt-textarea" contenteditable="true"><span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span></div>
+        await page.setContent(`<form data-chatgpt-composer><div id="prompt-textarea" contenteditable="true"><span data-id="plugin:fixture" data-keyword="OpenCode Native2" contenteditable="false">OpenCode Native2</span></div>
           ${captured.replace(">Think</span>", `>${label}</span>`)}
           ${captured.replace(/<(path|use)\b[^>]*><\/\1>/, '<path d="M0 0L20 20"/>').replace(">Think</span>", ">Search</span>")}</form>
           ${captured}<script>document.querySelectorAll('form button').forEach(button => button.onclick=()=>button.setAttribute('aria-pressed',String(button.getAttribute('aria-pressed')!=='true')));</script>`);
@@ -187,7 +187,7 @@ test.skipIf(!process.env.LAUNCHER_TEST_ELECTRON)("captured Think toggles indepen
         expect(await think.getAttribute("aria-pressed")).toBe("false");
         expect(await page.locator("form button").nth(1).getAttribute("aria-pressed")).toBe("false");
         expect(await page.locator("body > button").getAttribute("aria-pressed")).toBe("false");
-        expect(await composer.locator('[data-id="plugin:fixture"]').getAttribute("data-keyword")).toBe("Codex Native2");
+        expect(await composer.locator('[data-id="plugin:fixture"]').getAttribute("data-keyword")).toBe("OpenCode Native2");
       }
       // Two genuine controls are ambiguous; do not arbitrarily choose one.
       await page.locator("form").evaluate((form, html) => form.insertAdjacentHTML("beforeend", html), captured);

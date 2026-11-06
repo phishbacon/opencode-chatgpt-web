@@ -59,7 +59,7 @@ if (-not $Version) {
   $Version = Resolve-LatestReleaseVersion -Repository $Repository
 }
 if ($Version -and $Version.StartsWith("v")) { $Version = $Version.Substring(1) }
-if (-not $Version) { throw "Could not resolve the latest Codex Web GPT release" }
+if (-not $Version) { throw "Could not resolve the latest OpenCode ChatGPT Web release" }
 if ($Version -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid release version: $Version" }
 
 if (-not [Environment]::Is64BitOperatingSystem) {
@@ -72,8 +72,8 @@ $BaseUrl = "https://github.com/$Repository/releases/download/v$Version"
 $Temp = Join-Path ([System.IO.Path]::GetTempPath()) "codex-web-gpt-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $Temp | Out-Null
 try {
-  if (Get-Process -Name "Codex Web GPT" -ErrorAction SilentlyContinue) {
-    throw "Quit Codex Web GPT before updating it"
+  if (Get-Process -Name "OpenCode ChatGPT Web" -ErrorAction SilentlyContinue) {
+    throw "Quit OpenCode ChatGPT Web before updating it"
   }
   $Installer = Join-Path $Temp $Asset
   $Checksums = Join-Path $Temp "checksums.txt"
@@ -97,7 +97,7 @@ try {
   if (-not (Test-IsFullyQualifiedWindowsPath $InstallLocation)) {
     throw "Installer recorded an invalid InstallLocation: $InstallLocation"
   }
-  $Executable = Join-Path $InstallLocation "Codex Web GPT.exe"
+  $Executable = Join-Path $InstallLocation "OpenCode ChatGPT Web.exe"
   if (-not (Test-Path $Executable)) { throw "Installed launcher was not found at $Executable" }
   Start-Process $Executable
   Write-Host "Installed $Executable"

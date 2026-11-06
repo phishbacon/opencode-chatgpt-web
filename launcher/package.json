@@ -1,8 +1,8 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "6.1.17",
+  "version": "6.1.18-rc1",
   "private": true,
-  "description": "Desktop control center for Codex ChatGPT Web",
+  "description": "Desktop control center for OpenCode ChatGPT Web",
   "author": "miuuyy",
   "type": "module",
   "main": "electron/main.cjs",
@@ -41,11 +41,12 @@
     "fast-uri": "3.1.9",
     "global-agent": "4.1.3",
     "http-cache-semantics": "4.3.0",
+    "minimatch": "^11.0.1",
     "source-map-js": "1.2.2"
   },
   "build": {
     "appId": "dev.codexwebgpt.launcher",
-    "productName": "Codex Web GPT",
+    "productName": "OpenCode ChatGPT Web",
     "artifactName": "codex-web-gpt-${version}-${os}-${arch}.${ext}",
     "asar": true,
     "asarUnpack": [

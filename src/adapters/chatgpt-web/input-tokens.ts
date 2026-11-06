@@ -18,6 +18,7 @@ export function compiledChatGptWebMessages(compiled: CompiledChatGptWebPrompt): 
         TOKEN_ESTIMATE_TRANSACTION,
         index + 1,
         compiled.multipart!.parts.length,
+        compiled.multipart!.flavor,
       ).text
     )),
     formatChatGptWebMultipartCommit(compiled.multipart, TOKEN_ESTIMATE_TRANSACTION),
@@ -52,6 +53,7 @@ export function estimateCompiledChatGptWebInputTokens(
         TOKEN_ESTIMATE_TRANSACTION,
         index + 1,
         compiled.multipart!.parts.length,
+        compiled.multipart!.flavor,
       ).acknowledgement,
       modelId,
     ), 0)

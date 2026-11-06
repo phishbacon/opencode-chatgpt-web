@@ -268,7 +268,7 @@ export class ChatGptThreadEnvironmentStore {
             if (resolvedCalendarDelta.filesystemProfiles.some(profile => profile !== rollout.filesystemProfileXml)
               || resolvedCalendarDelta.workspaceRoots.some(roots => roots.length !== nativeRoots.size
                 || roots.some(root => !nativeRoots.has(root)))) {
-              throw new Error("Calendar environment delta conflicts with its current Codex rollout");
+              throw new Error("Calendar environment delta conflicts with its current OpenCode rollout");
             }
           }
           const conflicts = currentClaim ? conflictingAuthorityFields(currentClaim, rolloutEnvironment) : [];
@@ -277,7 +277,7 @@ export class ChatGptThreadEnvironmentStore {
             // Field names are safe to export; paths, request text and permission
             // contents are deliberately excluded from both the log and UI error.
             console.warn(`[chatgpt-web] trusted environment conflict (source=${source}, fields=${conflicts.join(",")})`);
-            throw new Error(`${source} environment conflicts with its current Codex rollout (fields: ${conflicts.join(", ")})`);
+            throw new Error(`${source} environment conflicts with its current OpenCode rollout (fields: ${conflicts.join(", ")})`);
           }
           this.set(rolloutIdentity.threadId, rolloutEnvironment);
           return rolloutEnvironment;
@@ -292,7 +292,7 @@ export class ChatGptThreadEnvironmentStore {
         nativeRolloutFound: false,
       })}`);
       if (this.codexHomes.length > 1) {
-        throw new Error("No current native Codex task proof in the trusted homes", { cause: error });
+        throw new Error("No current native OpenCode task proof in the trusted homes", { cause: error });
       }
       // Only a current native rollout can supersede an unrecognized historical envelope. Without
       // that proof, do not turn arbitrary history or an invalid update into cached authority.
@@ -367,8 +367,8 @@ export class ChatGptThreadEnvironmentStore {
       return;
     }
     const invalidState = (reason: string) => new ChatGptWebAdapterError(
-      `The saved Codex task environment file (thread-environments.json) ${reason}. `
-      + "Its contents have not been overwritten. Start a fresh Codex task to supply its current workspace and permissions. "
+      `The saved OpenCode task environment file (thread-environments.json) ${reason}. `
+      + "Its contents have not been overwritten. Start a fresh OpenCode task to supply its current workspace and permissions. "
       + "If that also fails, export Activity > Export safe log; do not delete your launcher settings.",
       { status: 409, errorType: "invalid_request_error", code: "thread_environment_state_invalid", retryable: false },
     );
@@ -383,7 +383,7 @@ export class ChatGptThreadEnvironmentStore {
       if (readFileSync(this.path, "utf8") !== source) throw invalidState("changed during recovery");
       const backup = `${this.path}.corrupt-${crypto.randomUUID()}`;
       renameSync(this.path, backup);
-      console.warn("[chatgpt-web] preserved corrupt thread-environments.json beside the original; rebuilding from a verified current Codex environment");
+      console.warn("[chatgpt-web] preserved corrupt thread-environments.json beside the original; rebuilding from a verified current OpenCode environment");
       this.loaded = true;
       return;
     }

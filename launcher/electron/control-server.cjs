@@ -124,7 +124,7 @@ class BrowserControlServer {
         const url = new URL(body?.url);
         if (url.origin !== "https://chatgpt.com" || url.username || url.password
           || !url.pathname.startsWith("/backend-api/codex/")) {
-          throw new Error("Proxy resolution is restricted to native Codex requests");
+          throw new Error("Proxy resolution is restricted to native OpenCode requests");
         }
         if (!this.resolveProxy) throw new Error("Native proxy resolver is unavailable");
         let proxy;
@@ -261,7 +261,7 @@ class BrowserControlServer {
           }
           if (observed.status === "timeout") {
             writeJson(response, 408, {
-              error: "Codex Zero Risk did not start within its allowed time after Sent confirmation",
+              error: "OpenCode Zero Risk did not start within its allowed time after Sent confirmation",
               code: "manual_turn_timed_out",
             });
             return;

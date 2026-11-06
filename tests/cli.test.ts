@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./../src/branding";
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -302,7 +303,7 @@ test("DEV help exposes separate history-fill and live composer-fill operations",
   }
 });
 
-test("DEV status reports the isolated home without creating a Codex route", async () => {
+test("DEV status reports the isolated home without creating a OpenCode route", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-chatgpt-web-cli-dev-status-"));
   const devHome = join(root, "dev");
   try {
@@ -421,14 +422,14 @@ test("DEV browser-only setup persists only the isolated harness profile", async 
       CODEX_HOME: join(root, "production-codex"),
     });
     expect({ exitCode: result.exitCode, stderr: result.stderr }).toEqual({ exitCode: 0, stderr: "" });
-    expect(result.stdout).toContain("No Codex route, Responses listener, or system service was installed");
+    expect(result.stdout).toContain("No OpenCode route, Responses listener, or system service was installed");
     expect(result.stdout).toContain("DEV launcher owns the isolated MCP tunnel");
     expect(inspections).toBe(1);
     expect(JSON.parse(readFileSync(join(devHome, "config.json"), "utf8"))).toMatchObject({
       version: 3,
       purpose: "dev-harness",
       mode: "browser-only",
-      appName: "Codex Native2 DEV",
+      appName: "OpenCode Native2 DEV",
       browserHost: "launcher",
       browserHostDescriptorPath: descriptorPath,
       solAvailable: true,
@@ -606,7 +607,7 @@ test("terminal uninstall refuses to race a launcher-owned runtime", async () => 
       CODEX_CHATGPT_WEB_HOME: appHome,
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("must be removed from Codex Web GPT Settings");
+    expect(result.stderr).toContain(`must be removed from ${PRODUCT_NAME} Settings`);
     expect(existsSync(configPath)).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });

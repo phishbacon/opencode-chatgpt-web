@@ -15,6 +15,7 @@ const {
 const {
   allowedAuthUrl,
   BrowserHost,
+  DEFAULT_RETAINED_TURN_TAB_TTL_MS,
   IDLE_BROWSER_URL,
   isChatGptCloudflareChallengeResponse,
   isNewChatUrl,
@@ -609,7 +610,7 @@ test("session inspection delegates navigation and capability detection to the sh
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     helper: { executable: "/runtime/electron", script: "/runtime/browser-helper.cjs" },
     descriptorPath: "/runtime/launcher-browser.json",
-    getConnectorName: () => "Codex Native2",
+    getConnectorName: () => "OpenCode Native2",
     getUseTemporaryChats: () => false,
     logger: { info() {} },
     view: { webContents: { getURL: () => "https://chatgpt.com/" } },
@@ -641,7 +642,7 @@ test("session inspection delegates navigation and capability detection to the sh
   assert.equal(calls.length, 2);
   assert.equal(calls[0].operation, "refresh");
   assert.equal(calls[1].operation, "inspect");
-  assert.equal(calls[1].appName, "Codex Native2");
+  assert.equal(calls[1].appName, "OpenCode Native2");
   assert.equal(calls[1].useTemporaryChats, false, "account inspection keeps its ordinary sign-in surface");
   assert.deepEqual(calls[1].payload, { detectCapabilities: true });
 });
@@ -2071,7 +2072,7 @@ test("launcher delegates every ChatGPT model and turn operation to the shared br
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
     helper: { executable: "/runtime/electron", script: "/runtime/browser-helper.cjs" },
     descriptorPath: "/runtime/launcher-browser.json",
-    getConnectorName: () => "Codex Native2",
+    getConnectorName: () => "OpenCode Native2",
     getUseTemporaryChats: () => false,
     logger: { info: (...args) => calls.push(["log", ...args]) },
     show: () => calls.push(["show"]),
@@ -2090,7 +2091,7 @@ test("launcher delegates every ChatGPT model and turn operation to the shared br
   });
   const helperCall = calls.find(call => call[0] === "helper")[1];
   assert.equal(helperCall.operation, "smoke");
-  assert.equal(helperCall.appName, "Codex Native2");
+  assert.equal(helperCall.appName, "OpenCode Native2");
 });
 
 test("browser helper operations fail closed when the configured connector name is invalid", async () => {
@@ -2126,9 +2127,9 @@ for (const useTemporaryChats of [false, true]) test(`hidden connector verificati
     },
   };
 
-  const result = await BrowserHost.prototype.runConnectorVerification.call(fixture, "Codex Native2");
+  const result = await BrowserHost.prototype.runConnectorVerification.call(fixture, "OpenCode Native2");
 
-  assert.deepEqual(result, { ok: true, appName: "Codex Native2" });
+  assert.deepEqual(result, { ok: true, appName: "OpenCode Native2" });
   assert.equal(calls.some(([type]) => type === "show"), false);
   assert.deepEqual(
     calls.filter(([type]) => ["refresh", "helper"].includes(type)),
@@ -2137,7 +2138,7 @@ for (const useTemporaryChats of [false, true]) test(`hidden connector verificati
       ["helper", {
         helper: fixture.helper,
         descriptorPath: fixture.descriptorPath,
-        appName: "Codex Native2",
+        appName: "OpenCode Native2",
         useTemporaryChats,
         logger: fixture.logger,
       }],
@@ -2198,10 +2199,10 @@ test("connector verification records a pre-helper navigation abort once and rele
     verifyConnectorWithBrowserHelper: async () => { helperCalls += 1; },
   });
 
-  await assert.rejects(fixture.verifyConnector("Codex Native2"), error => error === failure);
+  await assert.rejects(fixture.verifyConnector("OpenCode Native2"), error => error === failure);
 
   assert.deepEqual(records, [["error", "connector.verification_failed", {
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     errorName: failure.name,
     message: failure.message,
   }]]);
@@ -2230,14 +2231,14 @@ test("connector verification records the helper failure in launcher diagnostics"
   };
 
   await assert.rejects(
-    BrowserHost.prototype.runConnectorVerification.call(fixture, "Codex Native2"),
+    BrowserHost.prototype.runConnectorVerification.call(fixture, "OpenCode Native2"),
     failure,
   );
   assert.deepEqual(calls.find(call => call[1] === "connector.verification_failed"), [
     "error",
     "connector.verification_failed",
     {
-      appName: "Codex Native2",
+      appName: "OpenCode Native2",
       traceId: "verify-contract-trace",
       errorName: "ChatGptPersistentBrowserStateError",
       message: "ChatGPT connector proof did not leave a verified empty composer",
@@ -3025,7 +3026,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
     surfaceId: "surface-reused",
     traceId: "trace_previous",
     conversationKey,
-    connectorIdentity: "Codex Native2",
+    connectorIdentity: "OpenCode Native2",
     connectorBound: true,
     interactionMode: "automatic",
     helperPid: 111,
@@ -3059,7 +3060,7 @@ test("a later provider round reuses only its exact connector-bound conversation"
     false,
     222,
     conversationKey,
-    "Codex Native2",
+    "OpenCode Native2",
   );
 
   assert.deepEqual(lease, {
@@ -3086,7 +3087,7 @@ test("a retained conversation is not reused for a different connector identity",
     traceId: "trace_old",
     status: "ready",
     conversationKey,
-    connectorIdentity: "Codex Native2",
+    connectorIdentity: "OpenCode Native2",
     connectorBound: true,
     interactionMode: "automatic",
   };
@@ -3132,7 +3133,7 @@ test("an Automatic turn never reuses a retained Zero Risk conversation", async (
     status: "ready",
     interactionMode: "manual",
     conversationKey,
-    connectorIdentity: "Codex Native2",
+    connectorIdentity: "OpenCode Native2",
     connectorBound: true,
   };
   const fixture = Object.assign(Object.create(BrowserHost.prototype), {
@@ -3154,7 +3155,7 @@ test("an Automatic turn never reuses a retained Zero Risk conversation", async (
       false,
       222,
       conversationKey,
-      "Codex Native2",
+      "OpenCode Native2",
     ),
     {
       surfaceId: "surface-fresh",
@@ -3171,7 +3172,7 @@ test("an Automatic turn never reuses a retained Zero Risk conversation", async (
       false,
       222,
       conversationKey,
-      "Codex Native2",
+      "OpenCode Native2",
     ),
     /already belongs to Zero Risk interaction/,
   );
@@ -3184,7 +3185,7 @@ test("a connector conversation is not reused until its connector was bound", asy
     traceId: "trace_old",
     status: "ready",
     conversationKey,
-    connectorIdentity: "Codex Native2",
+    connectorIdentity: "OpenCode Native2",
     connectorBound: false,
     interactionMode: "automatic",
   };
@@ -3207,7 +3208,7 @@ test("a connector conversation is not reused until its connector was bound", asy
       false,
       222,
       conversationKey,
-      "Codex Native2",
+      "OpenCode Native2",
     ),
     {
       surfaceId: "surface-fresh",
@@ -3345,7 +3346,7 @@ test("a completed keyed turn is retained for thirty minutes and preserves its ac
     surfaceId: "surface-retained",
     traceId: "trace_retained",
     conversationKey: "e".repeat(64),
-    connectorIdentity: "Codex Native2",
+    connectorIdentity: "OpenCode Native2",
     connectorBound: false,
     helperPid: 777,
     status: "running",
@@ -3387,11 +3388,11 @@ test("a completed keyed turn is retained for thirty minutes and preserves its ac
   assert.deepEqual(throttling, [true]);
 
   const retainedAt = tab.lastHeartbeatAt;
-  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, retainedAt + (30 * 60 * 1000) - 1);
+  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, retainedAt + DEFAULT_RETAINED_TURN_TAB_TTL_MS - 1);
   assert.equal(fixture.turnTabs.has(tab.id), true);
 });
 
-test("a retained browser tab expires at thirty minutes", () => {
+test("a retained browser tab expires after the default fifteen-minute idle window", () => {
   const removed = [];
   const tab = {
     id: "tab-expired",
@@ -3408,10 +3409,61 @@ test("a retained browser tab expires at thirty minutes", () => {
     },
   };
 
-  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 100 + (30 * 60 * 1000));
+  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 100 + DEFAULT_RETAINED_TURN_TAB_TTL_MS - 1);
+  assert.equal(fixture.turnTabs.has(tab.id), true, "the default window is not elapsed yet");
+  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 100 + DEFAULT_RETAINED_TURN_TAB_TTL_MS);
 
   assert.deepEqual(removed, [[tab.id, false]]);
   assert.equal(fixture.turnTabs.size, 0);
+});
+
+test("a retained browser tab honors a configured idle retirement window", () => {
+  const removed = [];
+  const tab = {
+    id: "tab-configured",
+    traceId: "trace_configured",
+    status: "ready",
+    lastHeartbeatAt: 100,
+  };
+  const fixture = {
+    turnTabs: new Map([[tab.id, tab]]),
+    logger: { info() {} },
+    getRetainedTabIdleTimeoutMs: () => 60_000,
+    removeTurnTab(candidate, abortRunning) {
+      removed.push([candidate.id, abortRunning]);
+      this.turnTabs.delete(candidate.id);
+    },
+  };
+
+  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 100 + 60_000 - 1);
+  assert.equal(fixture.turnTabs.has(tab.id), true, "an elapsed default window does not override the configuration");
+  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, 100 + 60_000);
+
+  assert.deepEqual(removed, [[tab.id, false]]);
+});
+
+test("the idle sweep never retires an active turn", () => {
+  const now = 10_000_000;
+  const tab = {
+    id: "tab-active",
+    traceId: "trace_active",
+    status: "running",
+    bootstrapReady: true,
+    lastHeartbeatAt: now - 5_000,
+    helperPid: process.pid,
+  };
+  const fixture = {
+    turnTabs: new Map([[tab.id, tab]]),
+    logger: { info() {}, warn() {} },
+    getRetainedTabIdleTimeoutMs: () => 1_000,
+    removeTurnTab() {
+      throw new Error("an active tool/turn must never be retired by the idle sweep");
+    },
+  };
+
+  BrowserHost.prototype.reapExpiredTurnTabs.call(fixture, now);
+
+  assert.equal(fixture.turnTabs.has(tab.id), true);
 });
 
 test("a completed connector turn without binding is released instead of retained", async () => {
@@ -3420,7 +3472,7 @@ test("a completed connector turn without binding is released instead of retained
     id: "tab-unbound",
     traceId: "trace_unbound",
     conversationKey: "f".repeat(64),
-    connectorIdentity: "Codex Native2",
+    connectorIdentity: "OpenCode Native2",
     helperPid: 777,
     status: "running",
     loading: true,
@@ -3514,7 +3566,7 @@ function failedAutomaticTurnFixture() {
   const tab = {
     id: "failed-tab", traceId: "failed-trace", helperPid: 777,
     status: "running", interactionMode: "automatic", bootstrapReady: true,
-    conversationKey: "f".repeat(64), connectorIdentity: "Codex Native2", connectorBound: true,
+    conversationKey: "f".repeat(64), connectorIdentity: "OpenCode Native2", connectorBound: true,
     approvalPending: true, turnProgress: { stage: "chatgpt", activeToolCalls: 0 },
     view: { webContents: {
       isDestroyed: () => false, setBackgroundThrottling() {}, close: () => closed.push(tab.id),
@@ -3559,10 +3611,10 @@ test("failed ChatGPT pages remain inspectable but lose turn ownership and cannot
   assert.equal(tab.failedAt, failedAt, "repeated end notifications cannot extend retention");
   assert.deepEqual(closed, []);
 
-  fixture.lastTurnSweepAt = failedAt + 30 * 60_000 - 2;
-  await fixture.reapExpiredTurnTabs(failedAt + 30 * 60_000 - 1);
+  fixture.lastTurnSweepAt = failedAt + DEFAULT_RETAINED_TURN_TAB_TTL_MS - 2;
+  await fixture.reapExpiredTurnTabs(failedAt + DEFAULT_RETAINED_TURN_TAB_TTL_MS - 1);
   assert.equal(fixture.turnTabs.get(tab.id), tab, "helper liveness is irrelevant to a terminal page");
-  await fixture.reapExpiredTurnTabs(failedAt + 30 * 60_000);
+  await fixture.reapExpiredTurnTabs(failedAt + DEFAULT_RETAINED_TURN_TAB_TTL_MS);
   assert.deepEqual(closed, [tab.id]);
   assert.equal(fixture.turnTabs.size, 0);
 });
@@ -4240,7 +4292,7 @@ test("off-on-off fresh conversation changes retire completed history before it c
     const nextChannel = "launcher:temporary-chats";
     const key = "a".repeat(64);
     const stale = { id: "old-chat", traceId: "old-turn", status: "ready", interactionMode: "automatic",
-      conversationKey: key, connectorIdentity: "Codex Native2", connectorBound: true };
+      conversationKey: key, connectorIdentity: "OpenCode Native2", connectorBound: true };
     const manual = { id: "manual-chat", status: "ready", interactionMode: "manual", conversationKey: "b".repeat(64) };
     const state = { experimentalFreshConversationPerTurn: false, useTemporaryChats: false };
     const config = { experimentalFreshConversationPerTurn: false, useTemporaryChats: false };
@@ -4287,7 +4339,7 @@ test("off-on-off fresh conversation changes retire completed history before it c
     const disabling = handler(null, false);
     commit();
     await disabling;
-    const lease = await fixture.beginTurn("new-turn", false, 123, key, "Codex Native2");
+    const lease = await fixture.beginTurn("new-turn", false, 123, key, "OpenCode Native2");
     assert.equal(lease.reused, false);
     assert.equal(lease.tabId, "new-chat");
     assert.equal(state[property], false);

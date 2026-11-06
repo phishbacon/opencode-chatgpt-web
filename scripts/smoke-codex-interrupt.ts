@@ -13,7 +13,7 @@ import { installCodexIntegration } from "../src/codex-integration";
 import { startServer } from "../src/server";
 
 const codex = resolve(process.argv[2] ?? "/Applications/ChatGPT.app/Contents/Resources/codex");
-if (!existsSync(codex)) throw new Error(`Codex executable is missing: ${codex}`);
+if (!existsSync(codex)) throw new Error(`OpenCode executable is missing: ${codex}`);
 
 const bundled = spawnSync(codex, ["debug", "models", "--bundled"], {
   encoding: "utf8",
@@ -21,7 +21,7 @@ const bundled = spawnSync(codex, ["debug", "models", "--bundled"], {
   timeout: 15_000,
 });
 if (bundled.status !== 0) {
-  throw new Error(`Could not read bundled Codex models: ${bundled.error?.message || bundled.stderr}`);
+  throw new Error(`Could not read bundled OpenCode models: ${bundled.error?.message || bundled.stderr}`);
 }
 const nativeCatalog = JSON.parse(bundled.stdout);
 
@@ -49,7 +49,7 @@ const server = startServer(config, {
       adapterStarted = true;
       const identity = extractChatGptTurnIdentity(parsed);
       if (!identity.threadId || !identity.turnId) {
-        reject(new Error("Routed smoke turn has no native Codex identity"));
+        reject(new Error("Routed smoke turn has no native OpenCode identity"));
         return;
       }
       let rejectBrowser!: (error: Error) => void;
@@ -107,10 +107,10 @@ class AppServerClient {
       stderr: "pipe",
     });
     if (typeof child.stdin === "number" || child.stdin === undefined) {
-      throw new Error("Codex app-server stdin is not writable");
+      throw new Error("OpenCode app-server stdin is not writable");
     }
     if (!(child.stdout instanceof ReadableStream) || !(child.stderr instanceof ReadableStream)) {
-      throw new Error("Codex app-server output pipes are unavailable");
+      throw new Error("OpenCode app-server output pipes are unavailable");
     }
     this.child = child;
     this.input = child.stdin;
@@ -146,7 +146,7 @@ class AppServerClient {
         }
       }
     } finally {
-      for (const waiting of this.pending.values()) waiting.reject(new Error("Codex app-server exited"));
+      for (const waiting of this.pending.values()) waiting.reject(new Error("OpenCode app-server exited"));
       this.pending.clear();
     }
   }
@@ -196,9 +196,9 @@ try {
   const hookList = await client.request("hooks/list", { cwds: [root] });
   const hooks = Array.isArray(hookList?.data) ? hookList.data.flatMap((entry: any) => entry.hooks ?? []) : [];
   const installedHook = hooks.find((hook: any) => hook.command === journal.interruptHook.command);
-  if (!installedHook) throw new Error(`Codex did not discover the installed Interrupt hook: ${JSON.stringify(hookList)}`);
+  if (!installedHook) throw new Error(`OpenCode did not discover the installed Interrupt hook: ${JSON.stringify(hookList)}`);
   if (installedHook.currentHash !== journal.interruptHook.trustedHash || installedHook.trustStatus !== "trusted") {
-    throw new Error(`Codex did not trust the exact installed Interrupt hook: ${JSON.stringify(installedHook)}`);
+    throw new Error(`OpenCode did not trust the exact installed Interrupt hook: ${JSON.stringify(installedHook)}`);
   }
 
   const started = await client.request("thread/start", {
@@ -271,6 +271,6 @@ try {
   delete process.env.CODEX_HOME;
   delete process.env.CODEX_CHATGPT_WEB_HOME;
   if (smokeError) {
-    throw new Error(`${smokeError instanceof Error ? smokeError.message : String(smokeError)}\nCodex stderr:\n${stderr.slice(-8_000)}`);
+    throw new Error(`${smokeError instanceof Error ? smokeError.message : String(smokeError)}\nOpenCode stderr:\n${stderr.slice(-8_000)}`);
   }
 }

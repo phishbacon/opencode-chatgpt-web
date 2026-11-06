@@ -37,15 +37,15 @@ export function inspectCodexCompaction(config: AppConfig, configPath: string): D
     if (affected.length === 0) return [];
     return [{
       id: "codex-compaction", status: "warning",
-      message: "Custom Codex compaction limit exceeds Web model limits",
+      message: "Custom OpenCode compaction limit exceeds Web model limits",
       detail: `model_auto_compact_token_limit=${limit} overrides the model's advertised compaction threshold. `
         + `Affected limits: ${affected.slice(0, 3).join("; ")}${affected.length > 3 ? `; and ${affected.length - 3} more models` : ""}. `
         + `Remove that override from ${configPath}${profileName ? ` (default profile ${JSON.stringify(profileName)})` : ""} `
-        + "to use per-model defaults, then restart Codex. Also check model_context_window if you set it. "
+        + "to use per-model defaults, then restart OpenCode. Also check model_context_window if you set it. "
         + "Command-line and project configuration overrides are not inspected here.",
     }];
   } catch {
-    return [{ id: "codex-compaction", status: "warning", message: "Codex compaction settings could not be checked",
+    return [{ id: "codex-compaction", status: "warning", message: "OpenCode compaction settings could not be checked",
       detail: "Check config.toml syntax, the default profile, and positive integer model_auto_compact_token_limit/model_context_window values. No settings were changed." }];
   }
 }

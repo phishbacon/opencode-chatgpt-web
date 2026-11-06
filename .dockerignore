@@ -1,0 +1,15 @@
+# Browser-container build context (Phase 9). Never ship the local plan,
+# diagnostics, dev builds or host state into the image.
+.git
+.gitignore
+.env
+.env.example
+docker-compose.yml
+node_modules
+launcher/node_modules
+launcher/dist
+.launcher-runtime
+dist
+**/*.log
+diagnostics
+docs/OPENCODE_HARNESS_PLAN.md

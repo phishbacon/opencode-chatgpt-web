@@ -62,7 +62,7 @@ function devHostFor(existingConfig, interactionMode = "automatic") {
 
 test("prediction preference uses the owned setup flow and preserves approvals without refreshing models", async () => {
   for (const factory of [hostFor, devHostFor]) {
-    const fixture = factory({ mode: "full", appName: "Codex Native2", autoApproveToolCalls: true });
+    const fixture = factory({ mode: "full", appName: "OpenCode Native2", autoApproveToolCalls: true });
     for (const enabled of [false, true]) {
       assert.equal((await fixture.host.setComposerPredictions(enabled)).enabled, enabled);
       const args = fixture.invocation().args;
@@ -77,7 +77,7 @@ test("prediction preference uses the owned setup flow and preserves approvals wi
 });
 
 test("core setup preserves an existing full-harness installation", async () => {
-  const fixture = hostFor({ mode: "full", appName: "Codex Native2" });
+  const fixture = hostFor({ mode: "full", appName: "OpenCode Native2" });
   const result = await fixture.host.setupCore();
   assert.equal(result.mode, "full");
   assert.deepEqual(fixture.invocation().args, [
@@ -122,7 +122,7 @@ test("core setup refuses an implicit Automatic fallback for a new Zero Risk inst
 test("Zero Risk can be enabled only from an installed Full harness", async () => {
   await assert.rejects(
     hostFor(null).host.setBrowserInteractionMode("manual"),
-    /Install the Codex integration/,
+    /Install the OpenCode integration/,
   );
   await assert.rejects(
     hostFor({ mode: "browser-only", browserHost: "launcher" }).host.setBrowserInteractionMode("manual"),
@@ -134,7 +134,7 @@ test("browser interaction mode changes reuse the transactional setup and refresh
   const config = {
     mode: "full",
     browserHost: "launcher",
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     experimentalBiggerContext: true,
   };
   const manual = hostFor(config);
@@ -156,15 +156,15 @@ test("switching back from Zero Risk preserves the saved automatic connector iden
   const fixture = hostFor({
     mode: "full",
     browserHost: "launcher",
-    appName: "Codex Zero Risk",
-    automaticAppName: "Codex Native2",
+    appName: "OpenCode Zero Risk",
+    automaticAppName: "OpenCode Native2",
     browserInteractionMode: "manual",
   }, "manual");
   await fixture.host.setBrowserInteractionMode("automatic");
   const args = fixture.invocation().args;
   assert.equal(args.includes("--app-name"), false);
   assert.equal(fixture.host.setupConnectorName(), CURRENT_CONNECTOR_NAME);
-  assert.equal(args.includes("Codex Zero Risk"), false);
+  assert.equal(args.includes("OpenCode Zero Risk"), false);
 });
 
 test("DEV core setup configures only the isolated harness contract", async () => {
@@ -188,8 +188,8 @@ test("DEV core setup configures only the isolated harness contract", async () =>
   assert.equal(fixture.invocation().args.includes("--restart-service"), false);
 });
 
-test("Bigger Context uses the setup transaction and refreshes the production Codex catalog", async () => {
-  const fixture = hostFor({ mode: "full", appName: "Codex Native2", solAvailable: true });
+test("Bigger Context uses the setup transaction and refreshes the production OpenCode catalog", async () => {
+  const fixture = hostFor({ mode: "full", appName: "OpenCode Native2", solAvailable: true });
   const result = await fixture.host.setBiggerContext(true);
   assert.equal(result.enabled, true);
   assert.deepEqual(fixture.invocation(), {
@@ -219,7 +219,7 @@ test("Luna can enable and disable Bigger Context in production and DEV", async (
   }
 });
 
-test("Bigger Context updates the isolated DEV config without installing a Codex route", async () => {
+test("Bigger Context updates the isolated DEV config without installing a OpenCode route", async () => {
   const fixture = devHostFor({ mode: "browser-only" });
   const result = await fixture.host.setBiggerContext(false);
   assert.equal(result.enabled, false);
@@ -243,8 +243,8 @@ test("Zero Risk Pro transaction installs or removes only its explicit model prof
     mode: "full",
     browserHost: "launcher",
     browserInteractionMode: "manual",
-    appName: "Codex Zero Risk",
-    automaticAppName: "Codex Native2",
+    appName: "OpenCode Zero Risk",
+    automaticAppName: "OpenCode Native2",
   };
   const enabled = hostFor(config, "manual");
   const result = await enabled.host.setZeroRiskPro(true);
@@ -308,7 +308,7 @@ test("DEV MCP setup reuses only DEV-home credentials and targets its distinct co
     purpose: "dev-harness",
     mode: "full",
     browserHost: "launcher",
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     tunnel: {
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       runtimeKeyFile,
@@ -340,7 +340,7 @@ test("DEV doctor requires live tunnel readiness without probing a Responses list
   const fixture = devHostFor({
     purpose: "dev-harness",
     mode: "full",
-    appName: "Codex Native2 DEV",
+    appName: "OpenCode Native2 DEV",
     tunnel: { runtimeKeyFile },
   });
   fixture.host.supervisor.readTunnelHealth = async () => ({
@@ -394,7 +394,7 @@ test("launcher update transaction upgrades its owned full runtime with saved con
   const fixture = hostFor({
     mode: "full",
     browserHost: "launcher",
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     releaseVersion: "1.1.1",
     solAvailable: true,
     extraHighAvailable: false, proAvailable: false,
@@ -426,7 +426,7 @@ test("launcher update transaction upgrades its owned full runtime with saved con
 test("managed upgrades preserve automatic tool approval opt-in without enabling it by default", async () => {
   for (const mode of ["full", "browser-only"]) {
     for (const autoApproveToolCalls of [true, false, undefined]) {
-      const fixture = hostFor({ mode, browserHost: "launcher", appName: "Codex Native2",
+      const fixture = hostFor({ mode, browserHost: "launcher", appName: "OpenCode Native2",
         releaseVersion: "1.1.1", autoApproveToolCalls });
       assert.equal((await fixture.host.upgradeManagedRuntime()).updated, true);
       const { args } = fixture.invocation();
@@ -435,7 +435,7 @@ test("managed upgrades preserve automatic tool approval opt-in without enabling 
       assert.equal(args.includes("--preserve-disconnected-route"), true);
     }
   }
-  const manual = hostFor({ mode: "full", browserHost: "launcher", appName: "Codex Zero Risk",
+  const manual = hostFor({ mode: "full", browserHost: "launcher", appName: "OpenCode Zero Risk",
     browserInteractionMode: "manual", releaseVersion: "1.1.1", autoApproveToolCalls: true });
   assert.equal((await manual.host.upgradeManagedRuntime()).updated, true);
   assert.equal(manual.invocation().args.includes("--auto-approve-tool-calls"), false);
@@ -530,7 +530,7 @@ test("launcher update preserves Zero Risk and never probes its account capabilit
     mode: "full",
     browserHost: "launcher",
     browserInteractionMode: "manual",
-    appName: "Codex Zero Risk",
+    appName: "OpenCode Zero Risk",
     releaseVersion: "1.1.1",
   });
 
@@ -545,7 +545,7 @@ test("launcher update transaction leaves current and externally owned runtimes u
   const currentFull = hostFor({
     mode: "full",
     browserHost: "launcher",
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     releaseVersion: "1.1.3",
   });
   const external = hostFor({ mode: "browser-only", browserHost: "managed-chrome", releaseVersion: "1.1.1" });
@@ -562,7 +562,7 @@ test("an older launcher cannot automatically replace a newer managed runtime (#8
   for (const browserInteractionMode of ["automatic", "manual"]) {
     for (const [installed, launcher] of [["6.1.11", "6.1.9"], ["6.1.12", "6.1.12-rc.1"]]) {
       const config = {
-        mode: "full", browserHost: "launcher", appName: "Codex Native2",
+        mode: "full", browserHost: "launcher", appName: "OpenCode Native2",
         releaseVersion: installed, browserInteractionMode,
       };
       const before = structuredClone(config);
@@ -586,7 +586,7 @@ test("MCP setup reuses valid private credentials without exposing or rewriting t
   fs.writeFileSync(keyPath, "saved-private-runtime-key\n", { mode: 0o600 });
   const fixture = hostFor({
     mode: "full",
-    appName: "Codex Native2",
+    appName: "OpenCode Native2",
     tunnel: {
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
       runtimeKeyFile: keyPath,
@@ -724,14 +724,14 @@ test("bridge connection rejects a route command that did not reach the requested
   assert.deepEqual(fixture.calls, ["route status", "route connect", "runtime:stop"]);
 });
 
-test("startup recovery can restore the Codex route without requiring a healthy local runtime", async () => {
+test("startup recovery can restore the OpenCode route without requiring a healthy local runtime", async () => {
   const fixture = bridgeFixture({ active: true });
   const result = await fixture.host.restoreBridgeRoute("runtime-start-fail-safe");
   assert.equal(result.active, false);
   assert.deepEqual(fixture.calls, ["route status", "route disconnect --for-runtime-recovery", "route status"]);
 });
 
-test("failed runtime cleanup during removal still restores the previous Codex route", async () => {
+test("failed runtime cleanup during removal still restores the previous OpenCode route", async () => {
   const calls = [];
   const config = { mode: "full", browserHost: "launcher", releaseVersion: "1.1.2" };
   const host = new RuntimeHost({
@@ -764,7 +764,7 @@ test("failed runtime cleanup during removal still restores the previous Codex ro
 
   await assert.rejects(
     host.uninstallIntegration(),
-    /previous Codex route was restored, but launcher runtime cleanup did not complete/,
+    /previous OpenCode route was restored, but launcher runtime cleanup did not complete/,
   );
   assert.deepEqual(calls, ["runtime:stop", "route status", "route disconnect", "route status"]);
 });
@@ -844,13 +844,13 @@ test("integration removal rejects a command that leaves an inactive journal behi
 });
 
 test("connector verification uses the current identity and rejects a legacy local runtime", () => {
-  const full = hostFor({ mode: "full", appName: "Codex Native2" });
-  assert.equal(full.host.mcpConnectorName(), "Codex Native2");
-  assert.equal(full.host.browserConnectorName(), "Codex Native2");
+  const full = hostFor({ mode: "full", appName: "OpenCode Native2" });
+  assert.equal(full.host.mcpConnectorName(), "OpenCode Native2");
+  assert.equal(full.host.browserConnectorName(), "OpenCode Native2");
   const defaultName = hostFor(null);
   assert.equal(defaultName.host.browserConnectorName(), CURRENT_CONNECTOR_NAME);
   const legacyFull = hostFor({ mode: "full", appName: "Codex Native" });
-  assert.equal(legacyFull.host.browserConnectorName(), "Codex Native2");
+  assert.equal(legacyFull.host.browserConnectorName(), "OpenCode Native2");
   assert.throws(
     () => legacyFull.host.mcpConnectorName(),
     /still targets legacy ChatGPT connector.*create that connector as a new ChatGPT plugin/,
@@ -859,9 +859,9 @@ test("connector verification uses the current identity and rejects a legacy loca
   assert.throws(() => invalidFull.host.mcpConnectorName(), /Connector name is invalid/);
   assert.throws(() => invalidFull.host.browserConnectorName(), /Connector name is invalid/);
   const browserOnly = hostFor({ mode: "browser-only", appName: "Codex Native" });
-  assert.equal(browserOnly.host.browserConnectorName(), "Codex Native2");
+  assert.equal(browserOnly.host.browserConnectorName(), "OpenCode Native2");
   assert.throws(() => browserOnly.host.mcpConnectorName(), /MCP runtime is not configured/);
-  const dev = devHostFor({ mode: "full", appName: "Codex Native2" });
+  const dev = devHostFor({ mode: "full", appName: "OpenCode Native2" });
   assert.equal(dev.host.browserConnectorName(), DEV_CONNECTOR_NAME);
   assert.equal(dev.host.mcpConnectorName(), DEV_CONNECTOR_NAME);
 });
@@ -984,12 +984,12 @@ test("a failed setup preflight leaves the previous runtime running and untouched
   });
   host.run = async (_name, args) => {
     assert.equal(args.includes("--preflight-only"), true);
-    throw new Error("multi_agent_v2 in Codex [features] is unsupported");
+    throw new Error("multi_agent_v2 in OpenCode [features] is unsupported");
   };
   try {
     await assert.rejects(
       host.runSetup("runtime-upgrade", ["setup", "--browser-only"], {}),
-      /multi_agent_v2 in Codex \[features\] is unsupported$/,
+      /multi_agent_v2 in OpenCode \[features\] is unsupported$/,
     );
     assert.equal(stops, 0);
     assert.equal(starts, 0);
@@ -1518,25 +1518,25 @@ test("fresh-conversation preference uses production and DEV setup without forcin
 
 for (const development of [false, true]) test(`plugin renaming uses transactional ${development ? "DEV" : "production"} setup without changing credentials or refreshing models`, async () => {
   const factory = development ? devHostFor : hostFor;
-  const fixture = factory({ mode: "full", appName: "Codex Work", automaticAppName: "Codex Work", manualAppName: "Codex Zero Risk" });
-  assert.equal(fixture.host.setupConnectorName("manual"), "Codex Zero Risk");
-  assert.equal(fixture.host.setupConnectorName("automatic"), "Codex Work");
-  assert.equal(fixture.host.browserConnectorName(), "Codex Work");
-  assert.equal(fixture.host.mcpConnectorName(), "Codex Work");
+  const fixture = factory({ mode: "full", appName: "OpenCode Work", automaticAppName: "OpenCode Work", manualAppName: "OpenCode Zero Risk" });
+  assert.equal(fixture.host.setupConnectorName("manual"), "OpenCode Zero Risk");
+  assert.equal(fixture.host.setupConnectorName("automatic"), "OpenCode Work");
+  assert.equal(fixture.host.browserConnectorName(), "OpenCode Work");
+  assert.equal(fixture.host.mcpConnectorName(), "OpenCode Work");
   assert.deepEqual(await fixture.host.setConnectorNameSuffix("Work"), { changed: false });
   assert.equal(fixture.invocation(), undefined);
   await fixture.host.setConnectorNameSuffix("Home");
   const args = fixture.invocation().args;
   assert.equal(args[args.indexOf("--connector-name-suffix") + 1], "Home");
   for (const unwanted of ["--refresh-account-capabilities", "--tunnel-id", "--runtime-key-file"]) assert.equal(args.includes(unwanted), false);
-  await assert.rejects(fixture.host.setConnectorNameSuffix(""), /part after Codex/);
+  await assert.rejects(fixture.host.setConnectorNameSuffix(""), /part after OpenCode/);
   await assert.rejects(fixture.host.setConnectorNameSuffix("Zero Risk"), /must differ/);
   await assert.rejects(fixture.host.setConnectorNameSuffix("Native"), /retired/);
-  await assert.rejects(fixture.host.setConnectorNameSuffix("bad\nname"), /part after Codex/);
+  await assert.rejects(fixture.host.setConnectorNameSuffix("bad\nname"), /part after OpenCode/);
 });
 
 test("renaming rolls back the saved name if the new runtime fails", async () => {
-  const config = { mode: "full", browserHost: "launcher", appName: "Codex Old", automaticAppName: "Codex Old" };
+  const config = { mode: "full", browserHost: "launcher", appName: "OpenCode Old", automaticAppName: "OpenCode Old" };
   const fixture = hostFor(config);
   const host = fixture.host;
   host.runSetup = RuntimeHost.prototype.runSetup;
@@ -1545,13 +1545,13 @@ test("renaming rolls back the saved name if the new runtime fails", async () => 
   host.restoreSetupCheckpoint = checkpoint => { Object.assign(config, checkpoint); };
   host.restorePreviousRuntime = async () => {};
   host.run = async (_name, args) => {
-    if (!args.includes("--preflight-only")) Object.assign(config, { automaticAppName: "Codex New", appName: "Codex New" });
+    if (!args.includes("--preflight-only")) Object.assign(config, { automaticAppName: "OpenCode New", appName: "OpenCode New" });
     return { stdout: "" };
   };
   host.supervisor.startIfConfigured = async () => ({ status: "failed", detail: "fixture failure" });
   await assert.rejects(host.setConnectorNameSuffix("New"), /fixture failure/);
-  assert.equal(config.automaticAppName, "Codex Old");
-  assert.equal(config.appName, "Codex Old");
+  assert.equal(config.automaticAppName, "OpenCode Old");
+  assert.equal(config.appName, "OpenCode Old");
 });
 
 

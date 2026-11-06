@@ -219,7 +219,7 @@ export class LauncherBrowserHelperClient {
     }
     if (turn.externalProgress && !this.helperFeatures.has("tool-boundary-ack")) {
       throw new Error(
-        "Launcher browser helper does not support causal Codex tool-boundary acknowledgement; update or restart the launcher",
+        "Launcher browser helper does not support causal OpenCode tool-boundary acknowledgement; update or restart the launcher",
       );
     }
     if (turn.externalProgress && !this.helperFeatures.has("completion-fence")) {

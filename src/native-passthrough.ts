@@ -213,7 +213,7 @@ export async function forwardNativeCodexRequest(
 ): Promise<Response> {
   const authorization = request.headers.get("authorization") ?? "";
   if (!authorization.startsWith("Bearer ") || authorization.length <= "Bearer ".length) {
-    throw new Error("Native Codex passthrough requires the incoming Bearer authorization");
+    throw new Error("Native OpenCode passthrough requires the incoming Bearer authorization");
   }
 
   const incomingUrl = new URL(request.url);

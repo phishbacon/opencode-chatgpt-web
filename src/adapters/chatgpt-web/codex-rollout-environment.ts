@@ -82,7 +82,7 @@ function configuredSqliteHome(codexHome: string, explicit?: string, inheritEnvir
     );
     if (configured.present) {
       const value = configured.value?.trim();
-      if (!value) throw new Error("sqlite_home in Codex config must not be empty");
+      if (!value) throw new Error("sqlite_home in OpenCode config must not be empty");
       return resolve(codexHome, expandUserPath(value));
     }
   }
@@ -119,11 +119,11 @@ function indexedRollout(
         && row.parent_thread_id === identity.parentThreadId && row.status === "open"
       : row.parent_thread_id == null && (row.agent_path == null || row.agent_path === "/root");
     if (typeof row.rollout_path !== "string" || !matchesOwner) {
-      throw new Error(`Codex state does not authenticate the requested ${child ? "subagent" : "root thread"} rollout`);
+      throw new Error(`OpenCode state does not authenticate the requested ${child ? "subagent" : "root thread"} rollout`);
     }
     return { kind: "found", path: row.rollout_path };
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Codex state does not authenticate the requested ")) {
+    if (error instanceof Error && error.message.startsWith("OpenCode state does not authenticate the requested ")) {
       throw error;
     }
     // State storage is optional in Codex. A missing/older schema does not create authority; the
@@ -135,14 +135,14 @@ function indexedRollout(
 }
 
 function validateRolloutPath(codexHome: string, candidate: string, threadId: string): string {
-  if (!isAbsolute(candidate)) throw new Error("Codex state returned a non-absolute rollout path");
+  if (!isAbsolute(candidate)) throw new Error("OpenCode state returned a non-absolute rollout path");
   const sessionsRoot = realpathSync(join(codexHome, "sessions"));
-  if (lstatSync(candidate).isSymbolicLink()) throw new Error("Codex rollout path is a symbolic link");
+  if (lstatSync(candidate).isSymbolicLink()) throw new Error("OpenCode rollout path is a symbolic link");
   const rolloutPath = realpathSync(candidate);
-  if (!lstatSync(rolloutPath).isFile()) throw new Error("Codex rollout path is not a regular file");
-  if (!contains(sessionsRoot, rolloutPath)) throw new Error("Codex rollout path escapes the sessions directory");
+  if (!lstatSync(rolloutPath).isFile()) throw new Error("OpenCode rollout path is not a regular file");
+  if (!contains(sessionsRoot, rolloutPath)) throw new Error("OpenCode rollout path escapes the sessions directory");
   if (!canonicalRolloutName(basename(rolloutPath), threadId)) {
-    throw new Error("Codex rollout filename does not belong to the requested thread");
+    throw new Error("OpenCode rollout filename does not belong to the requested thread");
   }
   return rolloutPath;
 }
@@ -156,7 +156,7 @@ function scanCanonicalRollouts(codexHome: string, threadId: string): string[] {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
       visited += 1;
       if (visited > MAX_ROLLOUT_DIRECTORY_ENTRIES) {
-        throw new Error("Codex sessions directory is too large for an unindexed rollout lookup");
+        throw new Error("OpenCode sessions directory is too large for an unindexed rollout lookup");
       }
       if (entry.isSymbolicLink()) continue;
       const child = join(path, entry.name);
@@ -178,7 +178,7 @@ function parseJsonLine(line: Buffer): Record<string, unknown> {
     if (!item) throw new Error("not an object");
     return item;
   } catch (error) {
-    throw new Error("Codex rollout contains an invalid complete JSONL record", { cause: error });
+    throw new Error("OpenCode rollout contains an invalid complete JSONL record", { cause: error });
   }
 }
 
@@ -195,10 +195,10 @@ function firstRolloutRecord(fd: number, size: number): Record<string, unknown> {
     const newline = buffered.indexOf(0x0a);
     if (newline >= 0) return parseJsonLine(buffered.subarray(0, newline));
     if (buffered.length > MAX_ROLLOUT_JSON_LINE_BYTES) {
-      throw new Error("Codex rollout session metadata exceeds the bounded JSONL record size");
+      throw new Error("OpenCode rollout session metadata exceeds the bounded JSONL record size");
     }
   }
-  throw new Error("Codex rollout has no complete session metadata record");
+  throw new Error("OpenCode rollout has no complete session metadata record");
 }
 
 function latestRolloutPayload(fd: number, size: number, type: "turn_context" | "compacted"): Record<string, unknown> | undefined {
@@ -216,7 +216,7 @@ function latestRolloutPayload(fd: number, size: number, type: "turn_context" | "
     position -= length;
     const chunk = Buffer.alloc(length);
     const count = readSync(fd, chunk, 0, length, position);
-    if (count !== length) throw new Error("Codex rollout changed during authority lookup");
+    if (count !== length) throw new Error("OpenCode rollout changed during authority lookup");
     const data = Buffer.concat([chunk, carry]);
     let lineEnd = data.length;
     for (let index = data.length - 1; index >= 0; index -= 1) {
@@ -227,14 +227,14 @@ function latestRolloutPayload(fd: number, size: number, type: "turn_context" | "
       lineEnd = index;
       if (trailingPartial || line.length === 0) continue;
       if (line.length > MAX_ROLLOUT_JSON_LINE_BYTES) {
-        throw new Error("Codex rollout JSONL record exceeds the bounded record size");
+        throw new Error("OpenCode rollout JSONL record exceeds the bounded record size");
       }
       const item = parseJsonLine(line);
       if (item.type === type) return record(item.payload);
     }
     carry = Buffer.from(data.subarray(0, lineEnd));
     if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) {
-      throw new Error("Codex rollout JSONL record exceeds the bounded record size");
+      throw new Error("OpenCode rollout JSONL record exceeds the bounded record size");
     }
   }
   if (carry.length === 0) return undefined;
@@ -262,14 +262,14 @@ function verifyHistoricalEnvironmentMessages(
   messages: ChatGptUnattributedEnvironmentMessage[],
 ): void {
   const pending = new Map(messages.map(message => [message.id, message.content]));
-  if (pending.size !== messages.length) throw new Error("Codex environment history repeats a message id");
+  if (pending.size !== messages.length) throw new Error("OpenCode environment history repeats a message id");
   let position = 0;
   let carry = Buffer.alloc(0);
   while (position < size) {
     const length = Math.min(ROLLOUT_READ_CHUNK_BYTES, size - position);
     const chunk = Buffer.alloc(length);
     if (readSync(fd, chunk, 0, length, position) !== length) {
-      throw new Error("Codex rollout changed during environment history lookup");
+      throw new Error("OpenCode rollout changed during environment history lookup");
     }
     position += length;
     const data = Buffer.concat([carry, chunk]);
@@ -278,26 +278,26 @@ function verifyHistoricalEnvironmentMessages(
       const line = data.subarray(start, end);
       start = end + 1;
       if (!line.length) continue;
-      if (line.length > MAX_ROLLOUT_JSON_LINE_BYTES) throw new Error("Codex rollout JSONL record exceeds the bounded record size");
+      if (line.length > MAX_ROLLOUT_JSON_LINE_BYTES) throw new Error("OpenCode rollout JSONL record exceeds the bounded record size");
       const item = parseJsonLine(line);
       const payload = record(item.payload);
       // Core writes task_started before this turn's environment update. Merely finding matching
       // XML somewhere in the file would also accept a current update as historical.
       if (item.type === "event_msg" && payload?.type === "task_started" && payload.turn_id === turnId) {
         if (pending.size === 0) return;
-        throw new Error("Codex rollout does not authenticate the historical environment messages");
+        throw new Error("OpenCode rollout does not authenticate the historical environment messages");
       }
       if (item.type !== "response_item" || payload?.type !== "message" || payload.role !== "user"
         || typeof payload.id !== "string" || !pending.has(payload.id)) continue;
       if (!isDeepStrictEqual(payload.content, pending.get(payload.id))) {
-        throw new Error("Historical environment message differs from its native Codex record");
+        throw new Error("Historical environment message differs from its native OpenCode record");
       }
       pending.delete(payload.id);
     }
     carry = Buffer.from(data.subarray(start));
-    if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) throw new Error("Codex rollout JSONL record exceeds the bounded record size");
+    if (carry.length > MAX_ROLLOUT_JSON_LINE_BYTES) throw new Error("OpenCode rollout JSONL record exceeds the bounded record size");
   }
-  throw new Error("Codex rollout has no current task boundary for environment history");
+  throw new Error("OpenCode rollout has no current task boundary for environment history");
 }
 
 function validateSessionMeta(
@@ -310,7 +310,7 @@ function validateSessionMeta(
       || typeof payload.source !== "string" || payload.source === "subagent"
       || payload.parent_thread_id != null || payload.thread_source === "subagent"
       || (payload.agent_path != null && payload.agent_path !== "/root")) {
-      throw new Error("Codex rollout session metadata does not authenticate the requested root thread");
+      throw new Error("OpenCode rollout session metadata does not authenticate the requested root thread");
     }
     return;
   }
@@ -325,13 +325,13 @@ function validateSessionMeta(
     || payload.thread_source !== "subagent"
     || spawn?.parent_thread_id !== lineage.parentThreadId
     || !matchesAgentPath(spawn.agent_path, lineage.agentName)) {
-    throw new Error("Codex rollout session metadata does not authenticate the requested subagent");
+    throw new Error("OpenCode rollout session metadata does not authenticate the requested subagent");
   }
 }
 
 function absolutePaths(value: unknown, field: string): string[] {
   if (!Array.isArray(value) || value.some(path => typeof path !== "string" || !isAbsolute(path))) {
-    throw new Error(`Codex rollout ${field} is invalid`);
+    throw new Error(`OpenCode rollout ${field} is invalid`);
   }
   const unique = new Map<string, string>();
   for (const path of value as string[]) {
@@ -390,7 +390,7 @@ function exactManagedReadOnlyProfile(
 
 function networkAccess(value: Record<string, unknown>, field: string): boolean {
   if (value.network_access !== undefined && typeof value.network_access !== "boolean") {
-    throw new Error(`Codex rollout ${field} network_access is invalid`);
+    throw new Error(`OpenCode rollout ${field} network_access is invalid`);
   }
   return value.network_access === true;
 }
@@ -522,10 +522,10 @@ function environmentFromTurnContext(
   runtimeWorkspaceRoots?: string[],
 ): ChatGptTurnEnvironment {
   if (payload.turn_id !== expectedTurnId) {
-    throw new Error("Latest Codex rollout turn context does not belong to the requested turn");
+    throw new Error("Latest OpenCode rollout turn context does not belong to the requested turn");
   }
   if (typeof payload.cwd !== "string" || !isAbsolute(payload.cwd)) {
-    throw new Error("Codex rollout cwd is invalid");
+    throw new Error("OpenCode rollout cwd is invalid");
   }
   const cwd = resolve(payload.cwd);
   const declaredRoots = payload.workspace_roots === undefined
@@ -536,11 +536,11 @@ function environmentFromTurnContext(
   const sandbox = record(payload.sandbox_policy);
   if (!roots.some(root => contains(root, cwd))
     && !(permissionProfile?.type === "disabled" && sandbox?.type === "danger-full-access")) {
-    throw new Error("Codex rollout cwd is outside its workspace roots");
+    throw new Error("OpenCode rollout cwd is outside its workspace roots");
   }
 
   if (!permissionProfile || !sandbox) {
-    throw new Error("Codex rollout is missing its authoritative permission profile");
+    throw new Error("OpenCode rollout is missing its authoritative permission profile");
   }
   if (permissionProfile.type === "disabled" && sandbox.type === "danger-full-access") {
     const split = payload.file_system_sandbox_policy;
@@ -549,7 +549,7 @@ function environmentFromTurnContext(
       if (unrestricted?.kind !== "unrestricted"
         || unrestricted.entries !== undefined
         || unrestricted.glob_scan_max_depth !== undefined) {
-        throw new Error("Codex rollout split filesystem policy conflicts with full access");
+        throw new Error("OpenCode rollout split filesystem policy conflicts with full access");
       }
     }
     return {
@@ -567,7 +567,7 @@ function environmentFromTurnContext(
     if (!fileSystem
       || !exactManagedReadOnlyProfile(permissionProfile, expectedNetwork)
       || !splitPolicyMatchesProfile(payload.file_system_sandbox_policy, fileSystem)) {
-      throw new Error("Codex rollout read-only permission profile is inconsistent");
+      throw new Error("OpenCode rollout read-only permission profile is inconsistent");
     }
     return {
       cwd,
@@ -584,7 +584,7 @@ function environmentFromTurnContext(
       || !workspace
       || networkAccess(sandbox, "workspace-write") !== workspace.networkAccess
       || !splitPolicyMatchesProfile(payload.file_system_sandbox_policy, fileSystem)) {
-      throw new Error("Codex rollout workspace-write permission profile is inconsistent");
+      throw new Error("OpenCode rollout workspace-write permission profile is inconsistent");
     }
     return {
       cwd,
@@ -598,7 +598,7 @@ function environmentFromTurnContext(
       tools: [...(tools ?? [])],
     };
   }
-  throw new Error("Codex rollout permission profile cannot be represented safely by the Web bridge");
+  throw new Error("OpenCode rollout permission profile cannot be represented safely by the Web bridge");
 }
 
 /**
@@ -661,11 +661,11 @@ function validateMetadataConsistency(
   if (lineage.sandboxType === "platform"
     ? environment.sandboxPolicy.type === "dangerFullAccess"
     : environment.sandboxPolicy.type !== lineage.sandboxType) {
-    throw new Error(`ChatGPT Web ${owner} sandbox metadata conflicts with its Codex rollout`);
+    throw new Error(`ChatGPT Web ${owner} sandbox metadata conflicts with its OpenCode rollout`);
   }
   if (lineage.workspaceRoots.length > 0
     && !lineage.workspaceRoots.some(root => contains(root, environment.cwd))) {
-    throw new Error(`ChatGPT Web ${owner} workspace metadata does not contain its Codex rollout cwd`);
+    throw new Error(`ChatGPT Web ${owner} workspace metadata does not contain its OpenCode rollout cwd`);
   }
   if ((workspaceRootsDeclared || environment.sandboxPolicy.type !== "dangerFullAccess")
     && lineage.workspaceRoots.some(root => (
@@ -673,7 +673,7 @@ function validateMetadataConsistency(
       && !(environment.sandboxPolicy.type === "dangerFullAccess"
         && pathIdentity(root) === pathIdentity(environment.cwd))
     ))) {
-    throw new Error(`ChatGPT Web ${owner} workspace metadata conflicts with its Codex rollout roots`);
+    throw new Error(`ChatGPT Web ${owner} workspace metadata conflicts with its OpenCode rollout roots`);
   }
 }
 
@@ -694,7 +694,7 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
   if (!nativeThreadId && !nativeTurnId) return undefined;
   if (!nativeThreadId || !nativeTurnId || (compactionSourceTurnId !== undefined && !CODEX_ID.test(compactionSourceTurnId))
     || ("parentThreadId" in lineage && !CODEX_ID.test(lineage.parentThreadId))) {
-    throw new Error("Codex thread metadata contains an invalid native identifier");
+    throw new Error("OpenCode thread metadata contains an invalid native identifier");
   }
 
   // Establish one home before interpreting its permissions. Even a stale copy of
@@ -706,11 +706,11 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     const candidates = indexed.kind === "found" ? [indexed.path] : scanCanonicalRollouts(home, lineage.threadId);
     return { home, indexed, candidates };
   }).filter(owner => owner.candidates.length > 0);
-  if (owners.length > 1) throw new Error("Codex thread exists in multiple trusted homes");
+  if (owners.length > 1) throw new Error("OpenCode thread exists in multiple trusted homes");
   const owner = owners[0];
   if (!owner) {
     if (!("parentThreadId" in lineage)) return undefined;
-    throw new Error("Codex has no canonical rollout for the requested subagent thread");
+    throw new Error("OpenCode has no canonical rollout for the requested subagent thread");
   }
 
   const matching: CodexRolloutEnvironment[] = [];
@@ -719,17 +719,17 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     const fd = openSync(rolloutPath, "r");
     try {
       const size = fstatSync(fd).size;
-      if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Codex rollout is empty");
+      if (!Number.isSafeInteger(size) || size <= 0) throw new Error("OpenCode rollout is empty");
       const session = firstRolloutRecord(fd, size);
       validateSessionMeta(session, lineage);
       const sessionPayload = record(session.payload)!;
       const runtimeWorkspaceRoots = sessionPayload.runtime_workspace_roots === undefined
         ? undefined : absolutePaths(sessionPayload.runtime_workspace_roots, "runtime_workspace_roots");
       const latest = latestRolloutPayload(fd, size, "turn_context");
-      if (!latest) throw new Error("Codex rollout has no complete turn context");
+      if (!latest) throw new Error("OpenCode rollout has no complete turn context");
       if (latest.turn_id !== turnId && (compactionSourceTurnId === undefined || latest.turn_id !== compactionSourceTurnId)) {
         if (owner.indexed.kind === "found") {
-          throw new Error("Latest Codex rollout turn context does not belong to the requested turn");
+          throw new Error("Latest OpenCode rollout turn context does not belong to the requested turn");
         }
         continue;
       }
@@ -749,10 +749,10 @@ export function resolveCurrentCodexRolloutEnvironment(options: {
     }
   }
   if (matching.length === 0) {
-    throw new Error("Codex has no canonical rollout for the requested current turn");
+    throw new Error("OpenCode has no canonical rollout for the requested current turn");
   }
   if (matching.length > 1) {
-    throw new Error("Codex has multiple canonical rollouts for the requested current turn");
+    throw new Error("OpenCode has multiple canonical rollouts for the requested current turn");
   }
   return matching[0]!;
 }

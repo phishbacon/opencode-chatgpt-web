@@ -209,7 +209,7 @@ async function run(message: RunMessage): Promise<void> {
   const progress = message.turn.externalProgress
     ? new ChatGptMirroredTurnProgress(revision => {
       if (!writeProtocol({ type: "event", id: message.id, event: "tool_batch_observed", revision })) {
-        throw new Error("Browser helper could not acknowledge the observed Codex tool boundary");
+        throw new Error("Browser helper could not acknowledge the observed OpenCode tool boundary");
       }
     })
     : undefined;

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { PRODUCT_NAME } from "./branding";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { timingSafeEqual } from "node:crypto";
@@ -33,7 +34,7 @@ import { runDevCommand } from "./dev-chat/cli";
 
 const HELP = `codex-chatgpt-web ${VERSION}
 
-Focused ChatGPT web-backed models for the native Codex harness.
+Focused ChatGPT web-backed models for the native OpenCode harness.
 
 Usage:
   codex-chatgpt-web setup --browser-only [options]
@@ -46,6 +47,9 @@ Usage:
   codex-chatgpt-web dev launcher
   codex-chatgpt-web dev status [--json]
   codex-chatgpt-web dev setup <--browser-only|--full> [options]
+  codex-chatgpt-web dev prepare-opencode [--port PORT]
+  codex-chatgpt-web dev serve-opencode [--port PORT]
+  codex-chatgpt-web dev opencode [OpenCode arguments]
   codex-chatgpt-web dev chat NAME [--model MODEL] [MESSAGE]
   codex-chatgpt-web dev list
   codex-chatgpt-web serve
@@ -62,6 +66,7 @@ Setup options:
                                Send prompts and read ChatGPT state through browser automation (default)
   --zero-risk-browser-interaction
                                Full mode: select, paste, and send in the launcher yourself
+  --opencode-website-tools     OpenCode website MCP contract (full + automatic interaction only)
   --zero-risk-pro              Zero Risk: also install the explicit Pro-sized model row
   --zero-risk-default          Zero Risk: install only the default model row
   --port NUMBER                Loopback Responses port (default: 17841)
@@ -235,7 +240,7 @@ async function loginCommand(args: string[]): Promise<void> {
     assertNoArgs(args);
     const config = loadConfig();
     if (config.browserHost === "launcher") {
-      throw new Error("ChatGPT login is owned by the launcher; open Codex Web GPT and use its Sign in step");
+      throw new Error(`ChatGPT login is owned by the launcher; open ${PRODUCT_NAME} and use its Sign in step`);
     }
     const result = await loginToChatGpt(config);
     stdout.write(`ChatGPT login stored at ${result.storageStatePath}\n`);
@@ -290,6 +295,8 @@ async function setupCommand(args: string[]): Promise<void> {
   if (automaticBrowserInteraction || manualBrowserInteraction) {
     options.browserInteractionMode = manualBrowserInteraction ? "manual" : "automatic";
   }
+  const opencodeWebsiteTools = takeFlag(args, "--opencode-website-tools");
+  if (opencodeWebsiteTools) options.websiteMcpContract = "opencode";
   const connectorNameSuffix = takeOption(args, "--connector-name-suffix");
   if (connectorNameSuffix !== undefined) options.connectorNameSuffix = connectorNameSuffix;
   const subagentProtocol = takeOption(args, "--subagent-protocol");
@@ -386,7 +393,7 @@ async function setupCommand(args: string[]): Promise<void> {
     stdout.write("One account-level step remains: attach the tunnel to the ChatGPT connector named in config.\n");
     stdout.write("Open: https://chatgpt.com/#settings/Plugins\n");
   }
-  stdout.write("Restart the Codex app once so its native model catalog refreshes through the installed route.\n");
+  stdout.write("Restart the OpenCode app once so its native model catalog refreshes through the installed route.\n");
 }
 
 async function doctorCommand(args: string[]): Promise<void> {
@@ -421,7 +428,7 @@ async function routeCommand(args: string[]): Promise<void> {
   if (!result) throw new Error(`Unknown route action: ${action}`);
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if ("changed" in result && result.changed) {
-    process.stderr.write("Fully restart Codex to apply the route change.\n");
+    process.stderr.write("Fully restart OpenCode to apply the route change.\n");
   }
 }
 
@@ -430,7 +437,7 @@ async function subagentsCommand(args: string[]): Promise<void> {
   assertNoArgs(args);
   const config = loadConfig();
   if (config.purpose === "dev-harness") {
-    throw new Error("The isolated DEV harness has no Codex subagent protocol to configure");
+    throw new Error("The isolated DEV harness has no OpenCode subagent protocol to configure");
   }
   if (action === "status") {
     const integration = inspectCodexIntegration();
@@ -477,21 +484,21 @@ async function interruptHookCommand(args: string[]): Promise<void> {
   for await (const chunk of stdin) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.byteLength;
-    if (bytes > 32 * 1024) throw new Error("Codex Interrupt hook payload is too large");
+    if (bytes > 32 * 1024) throw new Error("OpenCode Interrupt hook payload is too large");
     chunks.push(buffer);
   }
   let payload: { hook_event_name?: unknown; session_id?: unknown; turn_id?: unknown };
   try {
     payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new Error("Codex Interrupt hook payload is not valid JSON");
+    throw new Error("OpenCode Interrupt hook payload is not valid JSON");
   }
   const threadId = typeof payload.session_id === "string" ? payload.session_id.trim() : "";
   const turnId = typeof payload.turn_id === "string" ? payload.turn_id.trim() : "";
   if (payload.hook_event_name !== "Interrupt"
     || !/^[A-Za-z0-9_-]{6,128}$/.test(threadId)
     || !/^[A-Za-z0-9_-]{6,128}$/.test(turnId)) {
-    throw new Error("Codex Interrupt hook payload has no valid session_id or turn_id");
+    throw new Error("OpenCode Interrupt hook payload has no valid session_id or turn_id");
   }
   await interruptActiveTurn(loadConfig(), { threadId, turnId });
 }
@@ -550,13 +557,13 @@ async function uninstallCommand(args: string[]): Promise<void> {
   const launcherControl = takeFlag(args, "--launcher-control");
   assertNoArgs(args);
   if (launcherControl) authorizeLauncherControl("uninstall");
-  if (!yes && !await confirm("Restore Codex config, stop services, and remove this installation?")) {
+  if (!yes && !await confirm("Restore OpenCode config, stop services, and remove this installation?")) {
     throw new Error("Uninstall cancelled");
   }
   const config = existsSync(getConfigPath()) ? loadConfig() : undefined;
   if (config?.browserHost === "launcher" && !launcherControl) {
     throw new Error(
-      "Launcher-owned integration must be removed from Codex Web GPT Settings so the active runtime can be drained safely.",
+      `Launcher-owned integration must be removed from ${PRODUCT_NAME} Settings so the active runtime can be drained safely.`,
     );
   }
   if (!config && process.platform === "darwin" && getServiceStatus().installed) {

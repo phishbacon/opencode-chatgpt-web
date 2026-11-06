@@ -1,3 +1,4 @@
+const { PRODUCT_NAME } = require("./branding.cjs");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -193,7 +194,7 @@ function findMacApplication(root) {
   const appEntry = entries.find((entry) => entry.isDirectory() && entry.name.endsWith(".app"));
   if (!appEntry) throw new Error("The macOS update archive does not contain an application bundle");
   const application = path.join(root, appEntry.name);
-  const executable = path.join(application, "Contents", "MacOS", "Codex Web GPT");
+  const executable = path.join(application, "Contents", "MacOS", PRODUCT_NAME);
   if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
     throw new Error("The macOS update archive is incomplete");
   }
@@ -201,7 +202,7 @@ function findMacApplication(root) {
 }
 
 function linuxUpdateInstallation() {
-  const guidance = "Quit Codex Web GPT, run install-launcher.sh from the README once, then reopen the installed app. Your settings and browser profile are preserved.";
+  const guidance = `Quit ${PRODUCT_NAME}, run install-launcher.sh from the README once, then reopen the installed app. Your settings and browser profile are preserved.`;
   const target = process.env.CODEX_WEB_GPT_APPIMAGE?.trim()
     || process.env.APPIMAGE?.trim();
   if (!target || !path.isAbsolute(target)) {

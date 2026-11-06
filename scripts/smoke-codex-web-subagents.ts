@@ -15,7 +15,7 @@ import { augmentNativeModelCatalog } from "../src/model-catalog";
 
 const codexArg = process.argv.slice(2).find(argument => !argument.startsWith("--"));
 const codex = resolve(codexArg ?? "/Applications/ChatGPT.app/Contents/Resources/codex");
-if (!existsSync(codex)) throw new Error(`Codex executable is missing: ${codex}`);
+if (!existsSync(codex)) throw new Error(`OpenCode executable is missing: ${codex}`);
 
 const runtimeConfig = loadConfig();
 if (runtimeConfig.browserHost !== "launcher") {
@@ -34,7 +34,7 @@ const bundled = spawnSync(codex, ["debug", "models", "--bundled"], {
   timeout: 15_000,
 });
 if (bundled.status !== 0) {
-  throw new Error(`Could not read bundled Codex models: ${bundled.error?.message || bundled.stderr}`);
+  throw new Error(`Could not read bundled OpenCode models: ${bundled.error?.message || bundled.stderr}`);
 }
 
 const root = mkdtempSync(join(tmpdir(), "codex-chatgpt-web-live-subagents-"));
@@ -177,7 +177,7 @@ try {
   const rootSession = sessions.find(session => session.depth === 0);
   const childSession = sessions.find(session => session.depth === 1);
   const failures: string[] = [];
-  if (exitCode !== 0) failures.push(`Codex exited ${exitCode}`);
+  if (exitCode !== 0) failures.push(`OpenCode exited ${exitCode}`);
   if (!rootSession) failures.push("missing root rollout");
   if (!childSession) failures.push("missing depth-1 Web child rollout");
 
@@ -213,7 +213,7 @@ try {
 
   if (failures.length > 0) {
     throw new Error(
-      `${failures.join("; ")}\nCodex stdout:\n${compactOutput(stdout)}\nCodex stderr:\n${compactOutput(stderr)}`,
+      `${failures.join("; ")}\nOpenCode stdout:\n${compactOutput(stdout)}\nOpenCode stderr:\n${compactOutput(stderr)}`,
     );
   }
   process.stdout.write(

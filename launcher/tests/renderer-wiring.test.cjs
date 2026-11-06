@@ -4,6 +4,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const launcherRoot = path.resolve(__dirname, "..");
+// Evaluated i18n/App slices import the product-name module; the vm contexts
+// below run outside Node's loader, so supply the bindings explicitly.
+const brandingModule = require("../electron/branding.cjs");
+const evalRequire = (id) => (String(id).replace(/\.c?js$/, "").endsWith("branding") ? brandingModule : require(id));
+const brandingGlobals = { PRODUCT_NAME: brandingModule.PRODUCT_NAME, require: evalRequire };
 const appSource = fs.readFileSync(path.join(launcherRoot, "src", "App.tsx"), "utf8");
 const stylesSource = fs.readFileSync(path.join(launcherRoot, "src", "styles.css"), "utf8");
 const electronMain = fs.readFileSync(path.join(launcherRoot, "electron", "main.cjs"), "utf8");
@@ -188,6 +193,7 @@ test("startup failure stays visible on another launch and Retry exits the failed
   const window = { isDestroyed: () => false, isMinimized: () => false,
     show: () => { visible = true; }, focus() {}, };
   const sandbox = {
+    ...brandingGlobals,
     mainWindow: window, mainWindowReadyToShow: false, mainWindowShowRequested: false,
     startupFailed: false, quitting: false,
     browserHost: { destroy: () => events.push("destroy") },
@@ -286,10 +292,11 @@ test("passkey buttons show launch progress, wait for Chrome, and preserve import
   const transpile = (source, fileName) => ts.transpileModule(source, { fileName, compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, jsxFactory: "element",
   } }).outputText;
-  const translated = { exports: {} };
+  const translated = { exports: {}, ...brandingGlobals };
   vm.runInNewContext(transpile(fs.readFileSync(path.join(launcherRoot, "src", "i18n.ts"), "utf8"), "i18n.ts"), translated);
   let state = [], cursor = 0, finishLogin, opens = 0, continues = 0;
   const sandbox = {
+    ...brandingGlobals,
     element: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState: value => { const index = cursor++; if (!(index in state)) state[index] = value;
       return [state[index], next => { state[index] = next; }]; },
@@ -401,10 +408,11 @@ test("installed integration can connect MCP while the native catalog refresh is 
   const transpile = (source, fileName) => ts.transpileModule(source, { fileName,
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
       jsx: ts.JsxEmit.React, jsxFactory: "element" } }).outputText;
-  const translated = { exports: {} };
+  const translated = { exports: {}, ...brandingGlobals };
   vm.runInNewContext(transpile(fs.readFileSync(path.join(launcherRoot, "src", "i18n.ts"), "utf8"), "i18n.ts"), translated);
   let connected = 0;
   const sandbox = {
+    ...brandingGlobals,
     element: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState: value => [value, () => {}], useMemo: callback => callback(), useEffect() {},
     React: { Fragment: "Fragment" },
@@ -464,7 +472,7 @@ test("launcher shares only privacy-safe exported diagnostics", () => {
 test("MCP verification failures stay inside the structured setup report", () => {
   assert.match(appSource, /next\.operation\.name !== "mcp-verification"/);
   assert.match(appSource, /next\.name !== "mcp-verification"/);
-  assert.match(electronMain, /Finish the active Codex task before verifying the ChatGPT connector/);
+  assert.match(electronMain, /Finish the active OpenCode task before verifying the ChatGPT connector/);
   assert.match(electronMain, /report\.checks\.filter\(\(check\) => check\.id !== "connector"\)/);
   assert.match(electronMain, /mcp\.verification_requested/);
   assert.match(electronMain, /launcherFocused:\s*mainWindow\?\.isFocused\(\) === true/);
@@ -495,7 +503,7 @@ test("saved ChatGPT authentication refresh does not gate local runtime startup",
   assert.equal(refreshBarrier, -1, "the bridge must start while ChatGPT is signed out or unavailable");
   assert.ok(upgrade > productionStartup);
   assert.ok(runtimeStart > upgrade, "configured runtime must start after any upgrade");
-  assert.ok(routeConnect > runtimeStart, "Codex route must connect only after the runtime is healthy");
+  assert.ok(routeConnect > runtimeStart, "OpenCode route must connect only after the runtime is healthy");
   assert.match(appSource, /browser\?\.status === "loading" \? copy\.checkingSignIn/);
 });
 
@@ -618,11 +626,12 @@ test("fresh-conversation snapshot uses runtime configuration and mode switching 
   let config = { browserInteractionMode: "automatic", experimentalFreshConversationPerTurn: true };
   const runtimeHost = {
     currentOperation: () => null,
-    runtimeConfigSnapshot: () => ({ config }), browserConnectorName: () => "Codex Native2",
-    setupConnectorName: () => "Codex Native2", mcpCredentialsConfigured: () => true,
+    runtimeConfigSnapshot: () => ({ config }), browserConnectorName: () => "OpenCode Native2",
+    setupConnectorName: () => "OpenCode Native2", mcpCredentialsConfigured: () => true,
     setBrowserInteractionMode: async mode => { config.browserInteractionMode = mode; return { configured: true }; },
   };
   const sandbox = {
+    ...brandingGlobals,
     handle: (name, handler) => handlers.set(name, handler), runtimeHost,
     releaseRetainedConversation: require("../electron/retained-turn-release.cjs").releaseRetainedConversation,
     stateStore: { read: () => ({ ...state }), update: patch => Object.assign(state, patch) },
@@ -714,10 +723,11 @@ test("browser preference controls are translated, disabled in Zero Risk, and inv
     fileName, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
       jsx: ts.JsxEmit.React, jsxFactory: "element" },
   }).outputText;
-  const translated = { exports: {} };
+  const translated = { exports: {}, ...brandingGlobals };
   vm.runInNewContext(transpile(fs.readFileSync(path.join(launcherRoot, "src", "i18n.ts"), "utf8"), "i18n.ts"), translated);
   let render, invocation, saved;
   const sandbox = {
+    ...brandingGlobals,
     element: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState: value => [value, () => {}],
     useEffect() {},
@@ -747,7 +757,7 @@ test("browser preference controls are translated, disabled in Zero Risk, and inv
       for (const available of property === "experimentalBiggerContext" ? [true, false] : [true])
       for (const [mode, configured, enabled] of [["automatic", true, false], ["automatic", true, true], ["manual", true, true], ["automatic", false, false]]) {
         const tree = render({ copy, devProfile: false, language, configureInteractionMode() {}, setError() {},
-          snapshot: { connectorNames: { automatic: "Codex Native2", manual: "Codex Zero Risk" }, state: { browserInteractionMode: mode, coreSetupComplete: configured, biggerContextAvailable: available, [property]: enabled } },
+          snapshot: { connectorNames: { automatic: "OpenCode Native2", manual: "OpenCode Zero Risk" }, state: { browserInteractionMode: mode, coreSetupComplete: configured, biggerContextAvailable: available, [property]: enabled } },
           updateState: value => { saved = value; },
         });
         const row = visit(tree).find(node => node.type === "SettingRow" && node.props.label === copy[label]);
@@ -776,6 +786,7 @@ test("approval notices are visible outside Browser and open the exact waiting ta
   let hookIndex = 0;
   let currentSurface = "settings";
   const sandbox = {
+    ...brandingGlobals,
     element: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState: value => [hookIndex++ === 0 ? currentSurface : value, () => {}],
     useRef: value => ({ current: value }), useEffect() {}, useLayoutEffect() {}, useCallback: callback => callback,
@@ -833,9 +844,9 @@ test("plugin rename invalidates verification only after success and rejects acti
     handle: (name, handler) => handlers.set(name, handler), browserHost,
     runtimeHost: {
       setConnectorNameSuffix: async () => { calls++; if (fail) throw new Error("setup failed"); return { changed: true }; },
-      browserConnectorName: () => "Codex Work",
-      setupConnectorName: mode => mode === "manual" ? "Codex Zero Risk" : "Codex Work",
-      runtimeConfigSnapshot: () => ({ config: { appName: "Codex Work" } }),
+      browserConnectorName: () => "OpenCode Work",
+      setupConnectorName: mode => mode === "manual" ? "OpenCode Zero Risk" : "OpenCode Work",
+      runtimeConfigSnapshot: () => ({ config: { appName: "OpenCode Work" } }),
     },
     stateStore: { read: () => state, update: patch => Object.assign(state, patch) },
     send: (channel, body) => events.push({ channel, body }),
@@ -852,23 +863,24 @@ test("plugin rename invalidates verification only after success and rejects acti
   assert.equal(state.mcpSetupComplete, false);
   assert.equal(state.mcpGuideStep, 2);
   assert.equal(events[0].channel, "launcher:connector-names-changed");
-  assert.equal(events[0].body.connectorNames.manual, "Codex Zero Risk");
+  assert.equal(events[0].body.connectorNames.manual, "OpenCode Zero Risk");
   assert.equal(events[1].channel, "launcher:state-changed");
 });
 
-test("plugin name editor fixes Codex and edits Native2 before asking to reconfigure", async () => {
+test("plugin name editor fixes OpenCode and edits Native2 before asking to reconfigure", async () => {
   const ts = require("typescript");
   const vm = require("node:vm");
   const transpile = (source, fileName) => ts.transpileModule(source, {
     fileName, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
       jsx: ts.JsxEmit.React, jsxFactory: "element", jsxFragmentFactory: "Fragment" },
   }).outputText;
-  const translated = { exports: {} };
+  const translated = { exports: {}, ...brandingGlobals };
   vm.runInNewContext(transpile(fs.readFileSync(path.join(launcherRoot, "src", "i18n.ts"), "utf8"), "i18n.ts"), translated);
   const copy = translated.exports.copyFor("en");
   const hooks = [];
   let cursor = 0, submitted, configureMode;
   const sandbox = {
+    ...brandingGlobals,
     element: (type, props, ...children) => ({ type, props: props ?? {}, children }), Fragment: "Fragment",
     useState: initial => { const index = cursor++; if (!(index in hooks)) hooks[index] = initial;
       return [hooks[index], value => { hooks[index] = value; }]; },
@@ -881,17 +893,17 @@ test("plugin name editor fixes Codex and edits Native2 before asking to reconfig
   const visit = tree => Array.isArray(tree) ? tree.flatMap(visit) : tree && typeof tree === "object"
     ? [tree, ...visit(tree.children ?? [])] : [];
   const render = () => { cursor = 0; return visit(sandbox.render({ copy, devProfile: false, language: "en",
-    snapshot: { connectorNames: { automatic: "Codex Native2", manual: "Codex Zero Risk" }, state: { browserInteractionMode: "automatic", coreSetupComplete: true } },
+    snapshot: { connectorNames: { automatic: "OpenCode Native2", manual: "OpenCode Zero Risk" }, state: { browserInteractionMode: "automatic", coreSetupComplete: true } },
     configureInteractionMode: mode => { configureMode = mode; }, setError: error => { if (error) throw new Error(error); }, updateState() {},
   })); };
   let nodes = render();
   const group = nodes.find(node => node.props.className === "plugin-name-input");
-  assert.ok(visit(group).some(node => node.type === "span" && node.children[0] === "Codex"));
+  assert.ok(visit(group).some(node => node.type === "span" && node.children[0] === "OpenCode"));
   const input = visit(group).find(node => node.type === "input");
   assert.equal(input.props.value, "Native2");
   input.props.onChange({ target: { value: "Work" } });
   nodes = render();
-  assert.ok(nodes.some(node => node.type === "code" && node.children[0] === "Codex Work"));
+  assert.ok(nodes.some(node => node.type === "code" && node.children[0] === "OpenCode Work"));
   nodes.find(node => node.type === "SecondaryButton" && node.children[0] === copy.pluginNameChange).props.onClick();
   assert.equal(submitted, undefined);
   nodes = render();

@@ -161,7 +161,7 @@ test("native interruption retires only the exact browser turn identity", async (
   const cancellation = sessions.cancelNativeTurn(
     "thread_target",
     "turn_shared",
-    new DOMException("Codex turn interrupted", "AbortError"),
+    new DOMException("OpenCode turn interrupted", "AbortError"),
   );
   expect(cancellation.cancelled).toBe(1);
   await cancellation.settlement;
@@ -464,7 +464,7 @@ test("turn broker names the finished turn that owns a replayed handle", async ()
       bindingId: "binding_never-issued",
       wireName: "exec_command",
     });
-    expect(unknownBinding).toBe("internal Codex turn binding is invalid or expired");
+    expect(unknownBinding).toBe("internal OpenCode turn binding is invalid or expired");
   } finally {
     await broker.close();
     rmSync(root, { recursive: true, force: true });

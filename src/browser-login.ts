@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./branding";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -231,7 +232,7 @@ export async function captureSystemBrowserLogin(
   const profileDir = mkdtempSync(join(profileParent, "login-profile-"));
   try { chmodSync(profileDir, 0o700); } catch {}
   process.stdout.write(
-    "Sign in with your passkey in the dedicated Chrome window. When ChatGPT is ready, return to Codex Web GPT and choose Continue.\n",
+    `Sign in with your passkey in the dedicated Chrome window. When ChatGPT is ready, return to ${PRODUCT_NAME} and choose Continue.\n`,
   );
 
   let capture: SystemBrowserLoginCapture | undefined;

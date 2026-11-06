@@ -1,3 +1,4 @@
+const { PRODUCT_NAME } = require("./branding.cjs");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -10,6 +11,7 @@ const {
   CURRENT_CONNECTOR_NAME,
   DEV_CONNECTOR_NAME,
   isLegacyConnectorName,
+  openCodeConnectorName,
   requireCurrentRuntimeConnectorName,
   validateConnectorName,
   validateConnectorNameSuffix,
@@ -109,7 +111,7 @@ function checkpointWritePath(snapshot) {
   if (!fs.lstatSync(snapshot.path).isSymbolicLink()
     || fs.readlinkSync(snapshot.path) !== snapshot.symlink.link
     || fs.realpathSync(snapshot.path) !== snapshot.symlink.target) {
-    throw new Error(`Codex config symlink changed during setup: ${snapshot.path}`);
+    throw new Error(`OpenCode config symlink changed during setup: ${snapshot.path}`);
   }
   return snapshot.symlink.target;
 }
@@ -147,19 +149,19 @@ function parseBridgeRouteResult(stdout, { expectedActive, requireInstalled = fal
   try {
     result = JSON.parse(stdout);
   } catch {
-    throw new Error("Codex bridge route command returned invalid JSON");
+    throw new Error("OpenCode bridge route command returned invalid JSON");
   }
   if (typeof result?.active !== "boolean") {
-    throw new Error("Codex bridge route command did not report its active state");
+    throw new Error("OpenCode bridge route command did not report its active state");
   }
   if (requireInstalled && typeof result.installed !== "boolean") {
-    throw new Error("Codex bridge route status did not report whether the integration is installed");
+    throw new Error("OpenCode bridge route status did not report whether the integration is installed");
   }
   if (Array.isArray(result.errors) && result.errors.length > 0) {
-    throw new Error(`Codex bridge route is inconsistent: ${result.errors.join("; ")}`);
+    throw new Error(`OpenCode bridge route is inconsistent: ${result.errors.join("; ")}`);
   }
   if (typeof expectedActive === "boolean" && result.active !== expectedActive) {
-    throw new Error(`Codex bridge route remained ${result.active ? "connected" : "disconnected"}`);
+    throw new Error(`OpenCode bridge route remained ${result.active ? "connected" : "disconnected"}`);
   }
   return result;
 }
@@ -851,11 +853,11 @@ class RuntimeHost {
   }
 
   async bridgeStatus(operationName = "bridge-status") {
-    this.assertProductionProfile("Codex bridge status");
+    this.assertProductionProfile("OpenCode bridge status");
     const result = await this.run(operationName, ["route", "status"], {
       embedded: true,
-      message: "Checking Codex bridge route",
-      successMessage: "Codex bridge route checked",
+      message: "Checking OpenCode bridge route",
+      successMessage: "OpenCode bridge route checked",
       timeoutMs: 15_000,
     });
     return parseBridgeRouteResult(result.stdout, { requireInstalled: true });
@@ -868,14 +870,14 @@ class RuntimeHost {
     const disconnected = await this.run(operationName, ["route", "disconnect",
       ...(forRuntimeRecovery ? ["--for-runtime-recovery"] : [])], {
       embedded: true,
-      message: "Restoring the previous Codex route",
-      successMessage: "Previous Codex route restored",
+      message: "Restoring the previous OpenCode route",
+      successMessage: "Previous OpenCode route restored",
       timeoutMs: 15_000,
     });
     const result = parseBridgeRouteResult(disconnected.stdout, { expectedActive: false });
     const verified = await this.bridgeStatus(operationName);
     if (!verified.installed || verified.active || (!forRuntimeRecovery && verified.reconnectOnStartup)) {
-      throw new Error("Codex bridge route restore did not persist in the active config");
+      throw new Error("OpenCode bridge route restore did not persist in the active config");
     }
     return {
       ...result,
@@ -894,25 +896,25 @@ class RuntimeHost {
   }
 
   async connectBridgeRoute({ recoveryOnly = false } = {}) {
-    this.assertProductionProfile("Codex bridge routing");
+    this.assertProductionProfile("OpenCode bridge routing");
     const name = "bridge-connect";
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     this.lifecycleOperation = name;
     try {
       const current = await this.bridgeStatus(name);
-      if (!current.installed) throw new Error("Install the Codex integration before connecting the bridge route");
+      if (!current.installed) throw new Error("Install the OpenCode integration before connecting the bridge route");
       if (current.active || (recoveryOnly && current.reconnectOnStartup !== true)) return current;
       try {
         const connected = await this.run(name, ["route", recoveryOnly ? "recover" : "connect"], {
           embedded: true,
-          message: "Connecting Codex to the launcher",
-          successMessage: "Codex bridge connected",
+          message: "Connecting OpenCode to the launcher",
+          successMessage: "OpenCode bridge connected",
           timeoutMs: 15_000,
         });
         const result = parseBridgeRouteResult(connected.stdout, recoveryOnly ? {} : { expectedActive: true });
         const verified = await this.bridgeStatus(name);
         if (!verified.installed || verified.active !== result.active) {
-          throw new Error("Codex bridge route connection did not persist in the active config");
+          throw new Error("OpenCode bridge route connection did not persist in the active config");
         }
         return result;
       } catch (error) {
@@ -941,6 +943,7 @@ class RuntimeHost {
 
   browserConnectorName() {
     const current = this.runtimeConfigSnapshot();
+    if (current.config?.websiteMcpContract === "opencode") return openCodeConnectorName(this.launcherProfile);
     if (this.launcherProfile === "development" && !current.config?.automaticAppName) {
       return connectorNameForDevSetup(current.config?.appName);
     }
@@ -951,7 +954,8 @@ class RuntimeHost {
   setupConnectorName(mode = "automatic") {
     if (mode !== "automatic" && mode !== "manual") throw new Error("Invalid interaction mode");
     const current = this.runtimeConfigSnapshot().config;
-    const defaultName = mode === "manual" ? "Codex Zero Risk"
+    if (mode === "automatic" && current?.websiteMcpContract === "opencode") return openCodeConnectorName(this.launcherProfile);
+    const defaultName = mode === "manual" ? "OpenCode Zero Risk"
       : this.launcherProfile === "development" ? DEV_CONNECTOR_NAME : CURRENT_CONNECTOR_NAME;
     const stored = mode === "manual" ? current?.manualAppName : current?.automaticAppName;
     if (stored !== undefined) return isLegacyConnectorName(stored) ? defaultName : validateConnectorName(stored);
@@ -963,11 +967,14 @@ class RuntimeHost {
   }
 
   async setConnectorNameSuffix(value) {
+    if (this.runtimeConfigSnapshot().config?.websiteMcpContract === "opencode") {
+      throw new Error("OpenCode website tools use a fixed connector name");
+    }
     const suffix = validateConnectorNameSuffix(value);
     const current = this.runtimeConfigSnapshot();
     if (!current.configured) throw new Error("Set up the launcher before changing the plugin name");
     const mode = this.browserInteractionMode();
-    const name = `Codex ${suffix}`;
+    const name = `OpenCode ${suffix}`;
     if (name === this.setupConnectorName(mode)) return { changed: false };
     if (name === this.setupConnectorName(mode === "manual" ? "automatic" : "manual")) {
       throw new Error("Automatic and Zero Risk connector names must differ");
@@ -995,14 +1002,14 @@ class RuntimeHost {
   cancelActiveTurns() {
     this.assertProductionProfile("Launcher-owned turn cancellation");
     return this.run("cancel-active-turns", ["service", "cancel-turns"], {
-      message: "Cancelling active Codex turns",
-      successMessage: "Active Codex turns cancelled",
+      message: "Cancelling active OpenCode turns",
+      successMessage: "Active OpenCode turns cancelled",
       timeoutMs: 15_000,
     });
   }
 
   async uninstallIntegration() {
-    this.assertProductionProfile("Codex integration removal");
+    this.assertProductionProfile("OpenCode integration removal");
     const name = "uninstall-integration";
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     const previousRuntime = this.runtimeConfigSnapshot();
@@ -1016,12 +1023,12 @@ class RuntimeHost {
           await this.restoreBridgeRouteWithinOperation(name);
         } catch (routeError) {
           throw new Error(
-            `${error instanceof Error ? error.message : String(error)}; restoring the previous Codex route also failed:`
+            `${error instanceof Error ? error.message : String(error)}; restoring the previous OpenCode route also failed:`
             + ` ${routeError instanceof Error ? routeError.message : String(routeError)}`,
           );
         }
         throw new Error(
-          `${error instanceof Error ? error.message : String(error)}; the previous Codex route was restored,`
+          `${error instanceof Error ? error.message : String(error)}; the previous OpenCode route was restored,`
           + " but launcher runtime cleanup did not complete",
         );
       }
@@ -1029,13 +1036,13 @@ class RuntimeHost {
         const result = await this.run(name, ["uninstall", "--yes", "--launcher-control"], {
           embedded: true,
           env: this.launcherControlEnvironment(),
-          message: "Restoring the previous Codex route",
-          successMessage: "Codex Web GPT integration removed",
+          message: "Restoring the previous OpenCode route",
+          successMessage: `${PRODUCT_NAME} integration removed`,
           timeoutMs: UNINSTALL_TIMEOUT_MS,
         });
         const verified = await this.bridgeStatus(name);
         if (verified.installed || verified.active) {
-          throw new Error("Codex integration removal did not persist in the active config");
+          throw new Error("OpenCode integration removal did not persist in the active config");
         }
         return result;
       } catch (error) {
@@ -1043,7 +1050,7 @@ class RuntimeHost {
           await this.restoreBridgeRouteWithinOperation(name);
         } catch (routeError) {
           throw new Error(
-            `${error instanceof Error ? error.message : String(error)}; restoring the previous Codex route also failed:`
+            `${error instanceof Error ? error.message : String(error)}; restoring the previous OpenCode route also failed:`
             + ` ${routeError instanceof Error ? routeError.message : String(routeError)}`,
           );
         }
@@ -1055,7 +1062,7 @@ class RuntimeHost {
   }
 
   async setupCore() {
-    this.assertProductionProfile("Codex integration setup");
+    this.assertProductionProfile("OpenCode integration setup");
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     const existing = this.runtimeConfigSnapshot();
     const mode = existing.mode;
@@ -1079,8 +1086,8 @@ class RuntimeHost {
       "--restart-service",
     ];
     const result = await this.runSetup("core-setup", args, {
-      message: "Installing ChatGPT Web models into Codex",
-      successMessage: "Codex integration installed",
+      message: "Installing ChatGPT Web models into OpenCode",
+      successMessage: "OpenCode integration installed",
       timeoutMs: CORE_SETUP_TIMEOUT_MS,
     });
     return { ...result, mode };
@@ -1156,7 +1163,7 @@ class RuntimeHost {
     if (current.config?.autoApproveToolCalls === true) args.push("--auto-approve-tool-calls");
     const result = await this.runSetup("bigger-context", args, {
       message: enabled ? "Enabling Bigger Context" : "Disabling Bigger Context",
-      successMessage: enabled ? "Bigger Context enabled; restart Codex" : "Standard context restored; restart Codex",
+      successMessage: enabled ? "Bigger Context enabled; restart OpenCode" : "Standard context restored; restart OpenCode",
       timeoutMs: CORE_SETUP_TIMEOUT_MS,
     });
     return { ...result, mode, enabled: enabled === true };
@@ -1304,7 +1311,7 @@ class RuntimeHost {
   async setZeroRiskPro(enabled) {
     const current = this.runtimeConfigSnapshot();
     if (!current.configured) {
-      throw new Error("Install the Codex integration before changing Zero Risk model profiles");
+      throw new Error("Install the OpenCode integration before changing Zero Risk model profiles");
     }
     if (current.config?.browserInteractionMode !== "manual" || current.mode !== "full") {
       throw new Error("Zero Risk Pro is available only while the Full Zero Risk harness is active");
@@ -1325,8 +1332,8 @@ class RuntimeHost {
     const options = {
       message: enabled ? "Installing the Zero Risk Pro model" : "Removing the Zero Risk Pro model",
       successMessage: enabled
-        ? `Zero Risk Pro installed${this.launcherProfile === "production" ? "; restart Codex" : ""}`
-        : `Default Zero Risk model restored${this.launcherProfile === "production" ? "; restart Codex" : ""}`,
+        ? `Zero Risk Pro installed${this.launcherProfile === "production" ? "; restart OpenCode" : ""}`
+        : `Default Zero Risk model restored${this.launcherProfile === "production" ? "; restart OpenCode" : ""}`,
       timeoutMs: CORE_SETUP_TIMEOUT_MS,
     };
     const result = this.launcherProfile === "development"
@@ -1336,7 +1343,7 @@ class RuntimeHost {
   }
 
   async upgradeManagedRuntime() {
-    this.assertProductionProfile("Managed Codex runtime upgrade");
+    this.assertProductionProfile("Managed OpenCode runtime upgrade");
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     const existing = this.runtimeConfigSnapshot();
     const currentVersion = this.app.getVersion();
@@ -1369,7 +1376,7 @@ class RuntimeHost {
     if (compareVersions(currentVersion, existing.config.releaseVersion) < 0) {
       throw new Error(
         `This launcher is version ${currentVersion}, but a newer runtime ${existing.config.releaseVersion} is already installed. `
-        + `Open Codex Web GPT ${existing.config.releaseVersion} or newer to continue.`,
+        + `Open ${PRODUCT_NAME} ${existing.config.releaseVersion} or newer to continue.`,
       );
     }
     const args = [
@@ -1408,7 +1415,7 @@ class RuntimeHost {
   }
 
   setupMcp({ tunnelId = "", runtimeKey = "", replace = false, interactionMode } = {}, afterRuntimeReady) {
-    this.assertProductionProfile("Native Codex MCP setup");
+    this.assertProductionProfile("Native OpenCode MCP setup");
     if (this.currentOperation()) throw new Error(`Another launcher operation is active: ${this.currentOperation()}`);
     const targetMode = interactionMode ?? this.browserInteractionMode();
     const reuseSavedCredentials = replace !== true && this.mcpCredentialsConfigured(targetMode);
@@ -1429,7 +1436,7 @@ class RuntimeHost {
     if (reuseSavedCredentials) {
       args.push("--acknowledge-unofficial", "--restart-service");
       return this.runSetup("mcp-setup", args, {
-        message: "Reconnecting the native Codex harness with saved tunnel credentials",
+        message: "Reconnecting the native OpenCode harness with saved tunnel credentials",
         successMessage: "Local MCP tools are ready",
         timeoutMs: MCP_SETUP_TIMEOUT_MS,
         afterRuntimeReady,
@@ -1449,7 +1456,7 @@ class RuntimeHost {
       "--restart-service",
     );
     return this.runSetup("mcp-setup", args, {
-      message: "Connecting the native Codex harness",
+      message: "Connecting the native OpenCode harness",
       successMessage: "Local MCP tools are ready",
       timeoutMs: MCP_SETUP_TIMEOUT_MS,
       afterRuntimeReady,
@@ -1506,7 +1513,7 @@ class RuntimeHost {
     }
     const current = this.runtimeConfigSnapshot();
     if (!current.configured) {
-      throw new Error("Install the Codex integration before changing browser interaction mode");
+      throw new Error("Install the OpenCode integration before changing browser interaction mode");
     }
     if (mode === "manual" && current.mode !== "full") {
       throw new Error("Connect the Full MCP harness before enabling Zero Risk");
@@ -1529,8 +1536,8 @@ class RuntimeHost {
         ? "Enabling Zero Risk"
         : "Enabling automatic browser interaction",
       successMessage: mode === "manual"
-        ? `Zero Risk enabled${this.launcherProfile === "production" ? "; restart Codex" : ""}`
-        : `Automatic browser interaction enabled${this.launcherProfile === "production" ? "; restart Codex" : ""}`,
+        ? `Zero Risk enabled${this.launcherProfile === "production" ? "; restart OpenCode" : ""}`
+        : `Automatic browser interaction enabled${this.launcherProfile === "production" ? "; restart OpenCode" : ""}`,
       timeoutMs: current.mode === "full" ? MCP_SETUP_TIMEOUT_MS : CORE_SETUP_TIMEOUT_MS,
       afterRuntimeReady,
     };
@@ -1563,8 +1570,8 @@ class RuntimeHost {
       if (this.launcherProfile === "production") {
         await this.run(name, [...args, "--preflight-only"], {
           ...options,
-          message: "Validating Codex configuration before changing the runtime",
-          successMessage: "Codex configuration is ready for setup",
+          message: "Validating OpenCode configuration before changing the runtime",
+          successMessage: "OpenCode configuration is ready for setup",
           timeoutMs: options.timeoutMs || CORE_SETUP_TIMEOUT_MS,
         });
       }

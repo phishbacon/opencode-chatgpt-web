@@ -17,7 +17,7 @@ function runCodex(args: string[], env = process.env): { stdout: string; stderr: 
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`Codex ${args.join(" ")} failed: ${result.error?.message || result.stderr || result.signal || `exit ${result.status}`}`);
+    throw new Error(`OpenCode ${args.join(" ")} failed: ${result.error?.message || result.stderr || result.signal || `exit ${result.status}`}`);
   }
   return { stdout: result.stdout, stderr: result.stderr };
 }
@@ -25,7 +25,7 @@ function runCodex(args: string[], env = process.env): { stdout: string; stderr: 
 const bundled = runCodex(["debug", "models", "--bundled"]);
 const sourceCatalog = JSON.parse(bundled.stdout) as { models?: unknown[] };
 if (!sourceCatalog.models?.some(model => model && typeof model === "object" && (model as { slug?: string }).slug === "gpt-5.6-sol")) {
-  throw new Error("Bundled Codex catalog has no gpt-5.6-sol template");
+  throw new Error("Bundled OpenCode catalog has no gpt-5.6-sol template");
 }
 
 const root = join(tmpdir(), `codex-chatgpt-web-codex-smoke-${process.pid}-${Date.now()}`);
@@ -70,19 +70,19 @@ try {
       : "",
   }));
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`Codex did not preserve the grouped and legacy ChatGPT Web model contract: ${JSON.stringify(actual)}`);
+    throw new Error(`OpenCode did not preserve the grouped and legacy ChatGPT Web model contract: ${JSON.stringify(actual)}`);
   }
   const nativeSol = catalog.models?.find(model => model.slug === "gpt-5.6-sol");
   const webPro = catalog.models?.find(model => model.slug === "chatgpt-web/pro");
   if (nativeSol?.multi_agent_version !== "v1" || webPro?.multi_agent_version !== "v1") {
     throw new Error(
-      `Codex did not preserve Compatibility V1 catalog metadata: ${JSON.stringify({ nativeSol, webPro })}`,
+      `OpenCode did not preserve Compatibility V1 catalog metadata: ${JSON.stringify({ nativeSol, webPro })}`,
     );
   }
   const features = runCodex(["features", "list"], isolatedEnv).stdout;
   if (!/^multi_agent\s+stable\s+true$/m.test(features)
     || !/^multi_agent_v2\s+stable\s+false$/m.test(features)) {
-    throw new Error(`Codex did not load the Compatibility V1 feature override:\n${features}`);
+    throw new Error(`OpenCode did not load the Compatibility V1 feature override:\n${features}`);
   }
   const spawnOverrides = (catalog.models ?? [])
     .filter(model => model.supported_in_api === true && model.visibility === "list")
@@ -97,7 +97,7 @@ try {
     "chatgpt-web/gpt-5.6-sol-instant",
   ];
   if (JSON.stringify(spawnOverrides) !== JSON.stringify(expectedSpawnOverrides)) {
-    throw new Error(`Codex did not preserve the bounded V1 subagent roster: ${JSON.stringify(spawnOverrides)}`);
+    throw new Error(`OpenCode did not preserve the bounded V1 subagent roster: ${JSON.stringify(spawnOverrides)}`);
   }
   process.stdout.write("NATIVE_CODEX_CATALOG_SMOKE_OK\n");
 } finally {

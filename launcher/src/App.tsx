@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./branding";
 import languages from "../electron/languages.json";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -1687,11 +1688,11 @@ function SettingsSurface({
   const [turnsCancelled, setTurnsCancelled] = useState(false);
   const [integrationRemoved, setIntegrationRemoved] = useState(false);
   const currentPluginName = snapshot.connectorNames[snapshot.state.browserInteractionMode];
-  const [nameSuffix, setNameSuffix] = useState(currentPluginName.slice(6));
+  const [nameSuffix, setNameSuffix] = useState(currentPluginName.slice("OpenCode ".length));
   const [confirmNameChange, setConfirmNameChange] = useState(false);
-  const proposedName = `Codex ${nameSuffix.trim()}`;
+  const proposedName = `OpenCode ${nameSuffix.trim()}`;
   useEffect(() => {
-    setNameSuffix(currentPluginName.slice(6));
+    setNameSuffix(currentPluginName.slice("OpenCode ".length));
     setConfirmNameChange(false);
   }, [currentPluginName]);
   const changePluginName = async () => {
@@ -1853,7 +1854,7 @@ function SettingsSurface({
         <div className="plugin-name-setting">
           <SettingRow body={copy.pluginNameBody} label={copy.pluginName}>
             <div className="plugin-name-input">
-              <span aria-hidden="true">Codex</span>
+              <span aria-hidden="true">OpenCode</span>
               <input
                 aria-label={copy.pluginName}
                 disabled={busy || !snapshot.state.coreSetupComplete}
@@ -2753,7 +2754,7 @@ function FatalMessage({ message }: { message: string }) {
   return (
     <main className="fatal-message">
       <BrandMark />
-      <h1>Codex Web GPT</h1>
+      <h1>{PRODUCT_NAME}</h1>
       <p>{message}</p>
     </main>
   );

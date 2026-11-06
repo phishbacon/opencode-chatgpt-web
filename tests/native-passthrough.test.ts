@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { forwardNativeCodexRequest } from "../src/native-passthrough";
 import { SUMMARY_PREFIX } from "../src/responses/compaction";
 
-test("forwards native Codex requests verbatim to the official backend", async () => {
+test("forwards native OpenCode requests verbatim to the official backend", async () => {
   const originalBody = Bun.zstdCompressSync(Buffer.from('{"model":"gpt-5.6-sol","stream":true}'));
   const encoded = new ArrayBuffer(originalBody.byteLength);
   new Uint8Array(encoded).set(originalBody);
@@ -39,7 +39,7 @@ test("forwards native Codex requests verbatim to the official backend", async ()
   expect(await response.text()).toBe("data: native\n\n");
 });
 
-test("forwards native Codex compaction requests to the official compact endpoint", async () => {
+test("forwards native OpenCode compaction requests to the official compact endpoint", async () => {
   const originalBody = Bun.zstdCompressSync(Buffer.from('{"model":"gpt-5.6-sol","input":[]}'));
   const encoded = new ArrayBuffer(originalBody.byteLength);
   new Uint8Array(encoded).set(originalBody);
@@ -104,8 +104,8 @@ test("native compaction failures record routing evidence without exposing reques
   }
 });
 
-test("forwards standalone Web Search through the authenticated native Codex route", async () => {
-  const body = JSON.stringify({ query: "Codex Web Search passthrough" });
+test("forwards standalone Web Search through the authenticated native OpenCode route", async () => {
+  const body = JSON.stringify({ query: "OpenCode Web Search passthrough" });
   const request = new Request("http://127.0.0.1:17841/v1/alpha/search?locale=en", {
     method: "POST",
     headers: {
@@ -129,7 +129,7 @@ test("forwards standalone Web Search through the authenticated native Codex rout
   expect(await response.json()).toEqual({ results: [{ title: "result" }] });
 });
 
-test("removes ChatGPT Web item identities before native Codex compaction", async () => {
+test("removes ChatGPT Web item identities before native OpenCode compaction", async () => {
   const body = {
     model: "gpt-5.6-sol",
     store: false,
@@ -296,7 +296,7 @@ test("keeps native encrypted reasoning requests byte-for-byte intact", async () 
   expect(Buffer.from(await upstreamRequest!.arrayBuffer())).toEqual(Buffer.from(originalBody));
 });
 
-test("native passthrough fails closed without Codex bearer authentication", async () => {
+test("native passthrough fails closed without OpenCode bearer authentication", async () => {
   const request = new Request("http://127.0.0.1:17841/v1/responses", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -304,7 +304,7 @@ test("native passthrough fails closed without Codex bearer authentication", asyn
   });
 
   await expect(forwardNativeCodexRequest(request, "responses")).rejects.toThrow(
-    "Native Codex passthrough requires the incoming Bearer authorization",
+    "Native OpenCode passthrough requires the incoming Bearer authorization",
   );
 });
 
@@ -322,11 +322,11 @@ test("forwards native model discovery as GET and preserves the client version qu
   expect(upstreamRequest!.headers.get("if-none-match")).toBeNull();
 });
 
-test("repairs a missing models client_version from an exact first-party Codex user agent", async () => {
+test("repairs a missing models client_version from an exact first-party OpenCode user agent", async () => {
   const request = new Request("http://127.0.0.1:17841/v1/models", {
     headers: {
       authorization: "Bearer codex-oauth-token",
-      "user-agent": "codex_chatgpt_desktop/0.151.0-alpha.7.2 (Mac OS 15.6; arm64) Codex",
+      "user-agent": "codex_chatgpt_desktop/0.151.0-alpha.7.2 (Mac OS 15.6; arm64) OpenCode",
     },
   });
   let upstreamRequest: Request | undefined;
@@ -341,7 +341,7 @@ test("does not invent a models client version from an unrelated user agent", asy
   const request = new Request("http://127.0.0.1:17841/v1/models", {
     headers: {
       authorization: "Bearer codex-oauth-token",
-      "user-agent": "Mozilla/5.0 Codex/999.999.999",
+      "user-agent": "Mozilla/5.0 OpenCode/999.999.999",
     },
   });
   let upstreamRequest: Request | undefined;

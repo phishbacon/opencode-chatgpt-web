@@ -1,3 +1,4 @@
+const { PRODUCT_NAME } = require("../electron/branding.cjs");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -82,8 +83,8 @@ try {
     const stage = path.join(scratch, "stage");
     fs.mkdirSync(stage);
     run("ditto", ["-x", "-k", archive, stage]);
-    macAppBundle = path.join(stage, "Codex Web GPT.app");
-    executable = path.join(macAppBundle, "Contents", "MacOS", "Codex Web GPT");
+    macAppBundle = path.join(stage, `${PRODUCT_NAME}.app`);
+    executable = path.join(macAppBundle, "Contents", "MacOS", PRODUCT_NAME);
     command = executable;
     args = ["--launcher-smoke-test"];
   } else if (process.platform === "linux") {

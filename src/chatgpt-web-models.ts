@@ -337,7 +337,7 @@ export interface ChatGptWebAccountCapabilities {
 export const CHATGPT_WEB_ZERO_RISK_MODEL_ROUTE: ChatGptWebZeroRiskModelRoute = {
   slug: "chatgpt-web/zero-risk",
   displayName: "ChatGPT Web — Zero Risk",
-  description: "Zero Risk keeps model selection and prompt submission under your control while preserving the native Codex harness.",
+  description: "Zero Risk keeps model selection and prompt submission under your control while preserving the native OpenCode harness.",
   interactionMode: "manual",
   backendModel: CHATGPT_WEB_ZERO_RISK_BACKEND_MODEL,
   codexEffort: "low",
@@ -406,7 +406,7 @@ export const CHATGPT_WEB_LEGACY_MODEL_ROUTES: readonly ChatGptWebAutomaticModelR
   {
     slug: "chatgpt-web/light",
     displayName: "ChatGPT Web — Instant",
-    description: "ChatGPT Web Instant through the native Codex harness.",
+    description: "ChatGPT Web Instant through the native OpenCode harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
     codexEffort: "low",
@@ -417,7 +417,7 @@ export const CHATGPT_WEB_LEGACY_MODEL_ROUTES: readonly ChatGptWebAutomaticModelR
   {
     slug: "chatgpt-web/medium",
     displayName: "ChatGPT Web — Medium",
-    description: "ChatGPT Web Medium through the native Codex harness.",
+    description: "ChatGPT Web Medium through the native OpenCode harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
     codexEffort: "medium",
@@ -428,7 +428,7 @@ export const CHATGPT_WEB_LEGACY_MODEL_ROUTES: readonly ChatGptWebAutomaticModelR
   {
     slug: "chatgpt-web/high",
     displayName: "ChatGPT Web — High",
-    description: "ChatGPT Web High through the native Codex harness.",
+    description: "ChatGPT Web High through the native OpenCode harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
     codexEffort: "high",
@@ -439,7 +439,7 @@ export const CHATGPT_WEB_LEGACY_MODEL_ROUTES: readonly ChatGptWebAutomaticModelR
   {
     slug: "chatgpt-web/extra-high",
     displayName: "ChatGPT Web — Extra High",
-    description: "Account-gated ChatGPT Web Extra High through the native Codex harness.",
+    description: "Account-gated ChatGPT Web Extra High through the native OpenCode harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
     codexEffort: "xhigh",
@@ -451,7 +451,7 @@ export const CHATGPT_WEB_LEGACY_MODEL_ROUTES: readonly ChatGptWebAutomaticModelR
   {
     slug: "chatgpt-web/pro",
     displayName: "ChatGPT Web — Pro",
-    description: "Account-gated ChatGPT Pro through the native Codex harness.",
+    description: "Account-gated ChatGPT Pro through the native OpenCode harness.",
     interactionMode: "automatic",
     backendModel: CHATGPT_WEB_BACKEND_MODEL,
     codexEffort: "ultra",

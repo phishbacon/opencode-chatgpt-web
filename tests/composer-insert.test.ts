@@ -92,16 +92,16 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("a selected connector never a
   try {
     const page = await browser.newPage();
     const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
-      config: { appName: "Codex Native2" },
+      config: { appName: "OpenCode Native2" },
     });
     const prompt = "Task context\n".repeat(5_000) + "\nrequest_id: current";
     for (const modern of [false, true]) {
       const pill = modern
-        ? '<span app-mention-path="app://fixture" app-mention-display-name="Codex Native2" contenteditable="false">Codex Native2</span>'
-        : '<span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span>';
+        ? '<span app-mention-path="app://fixture" app-mention-display-name="OpenCode Native2" contenteditable="false">OpenCode Native2</span>'
+        : '<span data-id="plugin:fixture" data-keyword="OpenCode Native2" contenteditable="false">OpenCode Native2</span>';
       for (const staleDraft of ["", prompt.replace("current", "earlier")]) {
         await page.setContent(`<form><div id="prompt-textarea" contenteditable="true" style="min-height:40px"></div></form>
-          <div id="mention-menu" hidden><div class="__menu-item" tabindex="0" data-highlighted><span>Codex Native2</span></div></div>`);
+          <div id="mention-menu" hidden><div class="__menu-item" tabindex="0" data-highlighted><span>OpenCode Native2</span></div></div>`);
         await page.locator("#prompt-textarea").evaluate((element, { pill, staleDraft }) => {
           element.innerHTML = pill;
           element.appendChild(document.createTextNode(staleDraft ? " " + staleDraft : ""));

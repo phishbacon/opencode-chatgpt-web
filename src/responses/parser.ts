@@ -233,6 +233,24 @@ function ensureAssistantPlaceholder(messages: CodexMessage[], modelId: string, n
  * `input_image` items): returns content parts when any image is present, else a plain joined string.
  * Never inlines an image_url as text (that would explode the token count).
  */
+/**
+ * OpenCode reports a failed native tool (for example a permission rejection) as a JSON
+ * object carrying an `error` payload instead of plain tool output, and the Responses
+ * contract has no separate error flag. Detect that shape so the failure reaches the
+ * broker and the website MCP as `is_error` instead of a successful result.
+ */
+function toolOutputIsError(output: string | unknown[] | undefined): boolean {
+  if (typeof output !== "string") return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return false;
+  }
+  if (!isObj(parsed)) return false;
+  return parsed.error !== null && typeof parsed.error === "object";
+}
+
 function outputToToolResultContent(output: string | unknown[] | undefined): string | CodexContentPart[] {
   if (typeof output === "string") return output;
   if (!Array.isArray(output)) return "";
@@ -275,7 +293,7 @@ function findToolById(messages: CodexMessage[], callId: string): { name: string;
   return { name: "" };
 }
 
-const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+export const REASONING_EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export function parseRequest(body: unknown): CodexParsedRequest {
   const replayedInputPrefixLength = previousResponseReplayPrefixLength(body);
@@ -572,7 +590,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
         messages.push({
           role: "toolResult", toolCallId: output.call_id,
           toolName: toolInfo.name, toolNamespace: toolInfo.namespace,
-          content: outputToToolResultContent(output.output), isError: false, timestamp: now,
+          content: outputToToolResultContent(output.output), isError: toolOutputIsError(output.output), timestamp: now,
         });
         continue;
       }
@@ -586,7 +604,7 @@ export function parseRequest(body: unknown): CodexParsedRequest {
           toolName: toolInfo.name, toolNamespace: toolInfo.namespace,
           // Same payload shape as function_call_output (codex-rs FunctionCallOutputPayload):
           // string or content items — normalize arrays instead of leaking raw wire blocks.
-          content: outputToToolResultContent(output.output), isError: false, timestamp: now,
+          content: outputToToolResultContent(output.output), isError: toolOutputIsError(output.output), timestamp: now,
         });
       }
     }

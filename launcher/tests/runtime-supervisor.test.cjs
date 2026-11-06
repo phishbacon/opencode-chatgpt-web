@@ -1,3 +1,4 @@
+const { PRODUCT_NAME } = require("../electron/branding.cjs");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -69,7 +70,7 @@ function launcherConfig(descriptorPath, overrides = {}) {
 }
 
 test("packaged runtime paths are native on Windows and Unix", () => {
-  const windows = packagedRuntimePaths("C:\\Program Files\\Codex\\resources", "win32");
+  const windows = packagedRuntimePaths("C:\\Program Files\\OpenCode\\resources", "win32");
   assert.equal(path.basename(windows.executable), "bun.exe");
   assert.equal(path.basename(windows.entrypoint), "cli.js");
 
@@ -81,11 +82,11 @@ test("packaged runtime paths are native on Windows and Unix", () => {
 test("Linux autostart launches the durable AppImage invisibly", () => {
   const entry = linuxDesktopEntry(
     { getPath: () => "/tmp/transient-electron" },
-    "/home/example/Applications/Codex Web GPT.AppImage",
+    `/home/example/Applications/${PRODUCT_NAME}.AppImage`,
   );
-  assert.match(
+  assert.ok(
+    entry.includes(`Exec="/home/example/Applications/${PRODUCT_NAME}.AppImage" --hidden`),
     entry,
-    /^Exec="\/home\/example\/Applications\/Codex Web GPT\.AppImage" --hidden$/m,
   );
   assert.doesNotMatch(entry, /APPIMAGE_EXTRACT_AND_RUN/);
   assert.match(entry, /^Terminal=false$/m);
@@ -95,9 +96,9 @@ test("Linux autostart launches the durable AppImage invisibly", () => {
 test("Linux autostart escapes desktop-entry field codes in executable paths", () => {
   const entry = linuxDesktopEntry(
     { getPath: () => "/tmp/transient-electron" },
-    "/home/example/100% ready/Codex Web GPT.AppImage",
+    `/home/example/100% ready/${PRODUCT_NAME}.AppImage`,
   );
-  assert.match(entry, /"\/home\/example\/100%% ready\/Codex Web GPT\.AppImage" --hidden/);
+  assert.ok(entry.includes(`Exec="/home/example/100%% ready/${PRODUCT_NAME}.AppImage" --hidden`), entry);
 });
 
 test("Linux autostart follows the stable installer wrapper across app updates", () => {
@@ -176,7 +177,7 @@ test("DEV runtime supervision ignores launcher version mismatch and starts only 
     releaseVersion: "9.9.9",
     purpose: "dev-harness",
     mode: "full",
-    appName: "Codex Native2 DEV",
+    appName: "OpenCode Native2 DEV",
     tunnel: {
       binaryPath: path.join(root, "bin", "tunnel-client"),
       tunnelId: "tunnel_0123456789abcdef0123456789abcdef",
@@ -244,7 +245,7 @@ test("launcher runtime validation rejects a relative full-mode executable before
 });
 
 test("launcher runtime validation accepts native Windows paths and a named pipe", () => {
-  const descriptorPath = "C:\\Users\\Example\\AppData\\Local\\Codex Web GPT\\launcher-browser.json";
+  const descriptorPath = `C:\\Users\\Example\\AppData\\Local\\${PRODUCT_NAME}\\launcher-browser.json`;
   const config = {
     version: 3,
     releaseVersion: "0.2.0",
@@ -256,7 +257,7 @@ test("launcher runtime validation accepts native Windows paths and a named pipe"
     browserHost: "launcher",
     browserHostDescriptorPath: descriptorPath.toLowerCase(),
     chromeExecutablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    storageStatePath: "C:\\Users\\Example\\AppData\\Local\\Codex Web GPT\\storage-state.json",
+    storageStatePath: `C:\\Users\\Example\\AppData\\Local\\${PRODUCT_NAME}\\storage-state.json`,
     brokerSocketPath: "\\\\.\\pipe\\codex-chatgpt-web-runtime-supervisor-test",
     headed: true,
     solAvailable: true,
@@ -286,14 +287,14 @@ test("launcher delegates long-lived tunnel supervision to native runtimes connec
     },
   });
   const invocation = {
-    executable: "C:\\Program Files\\Codex Web GPT\\resources\\runtime\\bun.exe",
+    executable: `C:\\Program Files\\${PRODUCT_NAME}\\resources\\runtime\\bun.exe`,
     args: [
-      "C:\\Program Files\\Codex Web GPT\\resources\\runtime\\app\\cli.js",
+      `C:\\Program Files\\${PRODUCT_NAME}\\resources\\runtime\\app\\cli.js`,
       "mcp",
       "--broker-socket",
       config.brokerSocketPath,
     ],
-    cwd: "C:\\Program Files\\Codex Web GPT\\resources\\runtime",
+    cwd: `C:\\Program Files\\${PRODUCT_NAME}\\resources\\runtime`,
   };
   const args = managedTunnelConnectArgs(config, invocation);
   assert.deepEqual(args.slice(0, 4), [
@@ -1350,7 +1351,7 @@ test("crash-loop diagnostics include the last redacted child failure", () => {
   }
 });
 
-test("launcher supervisor refuses shutdown while a Codex turn is active and compensates the drain", async () => {
+test("launcher supervisor refuses shutdown while a OpenCode turn is active and compensates the drain", async () => {
   const actions = [];
   const supervisor = new RuntimeSupervisor({
     app: { getVersion: () => "0.2.0", isPackaged: false },
@@ -2166,7 +2167,7 @@ test("observed CLI fresh-conversation changes retire completed tabs once and def
     biggerContextAvailable: true };
   const key = "a".repeat(64);
   const old = { id: "old", traceId: "old-trace", status: "ready", interactionMode: "automatic", conversationKey: key,
-    connectorIdentity: "Codex Native2", connectorBound: true };
+    connectorIdentity: "OpenCode Native2", connectorBound: true };
   const active = { id: "active", traceId: "active-trace", status: "running", interactionMode: "automatic", conversationKey: key };
   const manual = { id: "manual", status: "ready", interactionMode: "manual", conversationKey: "b".repeat(64) };
   let operation = null, updates = 0;
@@ -2215,7 +2216,7 @@ test("observed CLI fresh-conversation changes retire completed tabs once and def
     assert.deepEqual(removed, [old.id]);
     assert.equal(browserHost.turnTabs.get(active.id), active);
     assert.equal(browserHost.turnTabs.get(manual.id), manual);
-    const lease = await browserHost.beginTurn("new-trace", false, 123, key, "Codex Native2");
+    const lease = await browserHost.beginTurn("new-trace", false, 123, key, "OpenCode Native2");
     assert.equal(lease.reused, false);
     assert.equal(lease.tabId, "new");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

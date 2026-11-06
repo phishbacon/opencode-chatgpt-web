@@ -85,7 +85,7 @@ test("exported launcher logs remove local usernames, private ChatGPT titles, and
       detail: {
         line: "config loaded from /Users/local-person/.codex/config.toml",
         prompt: "private prompt",
-        connector: "Codex Native2",
+        connector: "OpenCode Native2",
         url: "https://chatgpt.com/c/private-conversation?state=oauth-secret&email=private@example.com",
         message: "failed while loading 'https://accounts.google.com/o/oauth2/v2/auth?state=oauth-secret&login_hint=private@example.com'",
       },
@@ -96,7 +96,7 @@ test("exported launcher logs remove local usernames, private ChatGPT titles, and
     assert.doesNotMatch(exported, /private\.user|local-person|Private roadmap|Health notes|private prompt|private-conversation|oauth-secret|private@example\.com/);
     assert.match(exported, /\[user-home\]/);
     assert.match(exported, /visible rows: \[redacted\]/);
-    assert.match(exported, /Codex Native2/);
+    assert.match(exported, /OpenCode Native2/);
     assert.match(exported, /"prompt":"\[redacted\]"/);
     assert.match(exported, /https:\/\/chatgpt\.com/);
     assert.match(exported, /https:\/\/accounts\.google\.com/);

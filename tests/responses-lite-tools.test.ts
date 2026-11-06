@@ -15,11 +15,11 @@ function responsesLiteTools() {
     name: "functions",
     description: "",
     tools: [
-      { type: "custom", name: "exec", description: "Run native Codex code", format: freeformFormat },
+      { type: "custom", name: "exec", description: "Run native OpenCode code", format: freeformFormat },
       {
         type: "function",
         name: "wait",
-        description: "Wait for native Codex code",
+        description: "Wait for native OpenCode code",
         strict: false,
         parameters: { type: "object", properties: {} },
       },

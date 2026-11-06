@@ -333,7 +333,7 @@ test("browser-only DEV driver runs real turns without advertising simulated tool
 
 test("DEV chat attaches its broker to the launcher-owned tunnel without a Responses listener", async () => {
   const root = scratch("cgw-dev-transport");
-  const occupied = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("normal Codex route") });
+  const occupied = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("normal OpenCode route") });
   const devBroker = defaultBrokerEndpoint(join(root, "dev"));
   const config = {
     ...defaultConfig("full"),
@@ -364,7 +364,7 @@ test("DEV chat attaches its broker to the launcher-owned tunnel without a Respon
     expect(transport.config).toBe(config);
     expect(await callTurnBroker(transport.config.brokerSocketPath, { method: "owner_status" }))
       .toMatchObject({ protocolVersion: 5 });
-    expect(await (await fetch(`http://127.0.0.1:${occupied.port}`)).text()).toBe("normal Codex route");
+    expect(await (await fetch(`http://127.0.0.1:${occupied.port}`)).text()).toBe("normal OpenCode route");
   } finally {
     await transport?.close();
     await occupied.stop(true);

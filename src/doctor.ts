@@ -65,18 +65,18 @@ function launcherOwnershipError(config: AppConfig, health: Record<string, unknow
 function modelCatalogCheck(health: Record<string, unknown>): DoctorCheck {
   const result = health.last_model_catalog_result as { status?: unknown; failure?: { stage?: unknown; code?: unknown } } | null | undefined;
   if (!result || !Number.isInteger(result.status)) {
-    return { id: "model-catalog", status: "warning", message: "This runtime has not observed a completed Codex model-list request yet" };
+    return { id: "model-catalog", status: "warning", message: "This runtime has not observed a completed OpenCode model-list request yet" };
   }
   const status = result.status as number;
   if (status >= 200 && status < 300) {
-    return { id: "model-catalog", status: "ok", message: "Codex's latest model-list request succeeded" };
+    return { id: "model-catalog", status: "ok", message: "OpenCode's latest model-list request succeeded" };
   }
   const stage = ["config", "request", "transport", "upstream", "catalog"].includes(String(result.failure?.stage))
     ? String(result.failure!.stage) : undefined;
   const code = typeof result.failure?.code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(result.failure.code)
     ? result.failure.code : undefined;
   return {
-    id: "model-catalog", status: "error", message: "Codex's latest model-list request failed; the local runtime is reachable",
+    id: "model-catalog", status: "error", message: "OpenCode's latest model-list request failed; the local runtime is reachable",
     detail: [`HTTP ${status}`, stage, code].filter(Boolean).join("; "),
   };
 }
@@ -101,7 +101,7 @@ async function proxyChecks(config: AppConfig): Promise<DoctorCheck[]> {
       return [{
         id: "proxy",
         status: "error",
-        message: "Responses proxy is still drained and is not accepting Codex turns",
+        message: "Responses proxy is still drained and is not accepting OpenCode turns",
       }];
     }
     const ownershipError = launcherOwnershipError(config, body);
@@ -174,11 +174,11 @@ export async function runDoctor(): Promise<DoctorReport> {
   const codex = inspectCodexIntegration();
   checks.push(...inspectCodexCompaction(config, codex.configPath));
   if (!codex.installed) {
-    checks.push({ id: "codex", status: "error", message: "Codex model route is not installed" });
+    checks.push({ id: "codex", status: "error", message: "OpenCode model route is not installed" });
   } else if (codex.errors.length > 0) {
-    checks.push({ id: "codex", status: "error", message: "Codex integration is inconsistent", detail: codex.errors.join("; ") });
+    checks.push({ id: "codex", status: "error", message: "OpenCode integration is inconsistent", detail: codex.errors.join("; ") });
   } else {
-    checks.push({ id: "codex", status: "ok", message: "Codex native model route is installed" });
+    checks.push({ id: "codex", status: "ok", message: "OpenCode native model route is installed" });
   }
 
   const service = getServiceStatus();

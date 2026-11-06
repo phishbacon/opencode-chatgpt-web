@@ -9,7 +9,7 @@ export interface ChatGptSkillFile {
 
 /** Only callers holding Codex's selected-skill metadata may use this transport. */
 export function selectedSkillFile(message: CodexUserMessage): ChatGptSkillFile {
-  if (message.origin !== "codex_skill") throw new Error("Missing Codex selected-skill provenance");
+  if (message.origin !== "codex_skill") throw new Error("Missing OpenCode selected-skill provenance");
   const content = message.content;
   if (Array.isArray(content) && content.some(part => part.type !== "text")) {
     throw new Error("Selected skill instructions must contain only text");
@@ -17,7 +17,7 @@ export function selectedSkillFile(message: CodexUserMessage): ChatGptSkillFile {
   const text = typeof content === "string" ? content : content.map(part => (part as { text: string }).text).join("\n");
   const name = /^<skill>\s*<name>([^<>\r\n]+)<\/name>/.exec(text)?.[1]?.trim();
   if (!name || !text.trimEnd().endsWith("</skill>")) {
-    throw new Error("Selected skill instructions have an invalid Codex envelope; disable Skills as files to send them inline");
+    throw new Error("Selected skill instructions have an invalid OpenCode envelope; disable Skills as files to send them inline");
   }
   // The digest makes changed versions and equal names from different packages distinct.
   // Keep the original envelope, including its path/resource authority, inside the file.

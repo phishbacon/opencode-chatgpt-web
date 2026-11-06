@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./../src/branding";
 import { expect, test } from "bun:test";
 import {
   CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET,
@@ -32,16 +33,16 @@ function request(reasoning: "low" | "medium" | "high" | "xhigh" | "max"): CodexP
 test("custom plugin identity stays explicit in inline and multipart execution without rewriting task history", () => {
   const capabilities = { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true };
   const parsed = request("high");
-  parsed.context.messages[1]!.content = "Compare Codex Native2 with the selected plugin.";
-  for (const appName of ["Codex app", "Codex Native2 DEV", "Codex Робота"]) {
+  parsed.context.messages[1]!.content = "Compare OpenCode Native2 with the selected plugin.";
+  for (const appName of ["OpenCode app", "OpenCode Native2 DEV", "OpenCode Робота"]) {
     for (const parts of [undefined, 2, 6] as const) {
       const compiled = compileChatGptWebPrompt(parsed, capabilities, "turn_12345678901234567890123456789012", {
         appName, experimentalMultipartParts: parts,
       });
       const contract = compiled.multipart?.commit ?? compiled.text;
-      expect(contract).toContain(`The selected local Codex plugin for this turn is ${JSON.stringify(appName)}.`);
+      expect(contract).toContain(`The selected local OpenCode plugin for this turn is ${JSON.stringify(appName)}.`);
       expect(contract).toContain("Do not substitute another plugin for this local connection");
-      expect(contract).not.toContain("attached Codex Native tools");
+      expect(contract).not.toContain("attached OpenCode Native tools");
       const history = compiled.multipart
         ? compiled.multipart.parts.flatMap(part => JSON.parse(part).records).filter(record => record.kind === "message").map(record => record.message)
         : JSON.parse(compiled.text.match(/<codex_context_json>\n(.+)\n<\/codex_context_json>/s)![1]!).messages;
@@ -145,14 +146,14 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(tokenMatches).toHaveLength(1);
   expect(compiled.text).toContain("[retired turn handle]");
   expect(transportOnly).toContain("For local work required by the task, use the selected plugin's tools directly according to their declared descriptions and schemas.");
-  expect(transportOnly).toContain("Call a local Codex tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.");
+  expect(transportOnly).toContain("Call a local OpenCode tool only when the latest active request requires a local effect or fresh local evidence that is not already present in the supplied context; otherwise answer the request directly without a tool call.");
   expect(transportOnly).toContain("Use actual results from the selected plugin as evidence for local observations and effects.");
   expect(transportOnly).toContain("A tool result from the selected plugin may require context compaction. If it does, follow the compaction instructions in that result exactly.");
   expect(transportOnly).toContain("After a deterministic tool failure, update the working hypothesis from that result");
   expect(transportOnly).toContain("do not repeat the same call unless its inputs or observable state changed.");
   expect(transportOnly).toContain("Continue using the available tools until the requested work is complete and verified.");
   expect(transportOnly).toContain("Write the user-facing final answer only after the last required tool result has settled.");
-  expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every tool call through the selected local Codex plugin in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
+  expect(transportOnly).toContain(`The task context is complete. Pass turn_token ${token} unchanged to every tool call through the selected local OpenCode plugin in this response, including continuations after tool results; do not expose it in the answer. Execute the latest active user request now.`);
   expect(transportOnly).not.toMatch(/codex_bind_turn|binding_id|outer_tool_gateway|command_tool/);
   expect(transportOnly).not.toMatch(/codex_exec|codex_write_stdin|codex_apply_patch|codex_view_image|codex_tool_inventory|codex\.control\.turn_complete/);
   expect(transportOnly).toContain("Do not claim a safety or permission block without an explicit tool result or platform error supporting it.");
@@ -161,7 +162,7 @@ test("Full-mode Pro prompts pass one stable turn token directly to native action
   expect(compiled.text).not.toContain("internally compacts this response");
 });
 
-test("Pro preserves the same native Codex delegation contract as Extra High", () => {
+test("Pro preserves the same native OpenCode delegation contract as Extra High", () => {
   const token = "turn_12345678901234567890123456789012";
   const capabilities = { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true };
   const pro = compileChatGptWebPrompt(request("max"), capabilities, token);
@@ -169,7 +170,7 @@ test("Pro preserves the same native Codex delegation contract as Extra High", ()
 
   for (const compiled of [pro, extraHigh]) {
     expect(compiled.text).toContain("For local work required by the task, use the selected plugin's tools directly according to their declared descriptions and schemas.");
-    expect(compiled.text).toContain(`Pass turn_token ${token} unchanged to every tool call through the selected local Codex plugin in this response`);
+    expect(compiled.text).toContain(`Pass turn_token ${token} unchanged to every tool call through the selected local OpenCode plugin in this response`);
     expect(compiled.text).not.toContain("Complete this task directly in the current parent response.");
     expect(compiled.text).not.toContain("Do not create, spawn, delegate to, or wait on sub-agents");
     expect(compiled.text).not.toContain("Use non-agent tools directly instead.");
@@ -284,7 +285,7 @@ test("browser-only Medium directs users to the full harness", () => {
   const warning = chatGptReadOnlyContextWarning(request("medium"), capabilities);
   expect(warning).toStartWith("> **Local tools unavailable**");
   expect(warning).toContain("`MCP`");
-  expect(warning).toContain("`Codex Web GPT`");
+  expect(warning).toContain(`\`${PRODUCT_NAME}\``);
   expect(warning).toContain("`Full`");
   expect(warning).toContain("selected ChatGPT Web model");
   expect(warning).not.toContain("tool-capable ChatGPT Web model first");
@@ -302,7 +303,7 @@ test("compaction prompts are isolated summarization turns without local or nativ
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
   );
 
-  expect(compiled.text).toContain("This is a Codex history-compaction checkpoint, not a normal task turn.");
+  expect(compiled.text).toContain("This is a OpenCode history-compaction checkpoint, not a normal task turn.");
   expect(compiled.text).toContain("Produce the requested checkpoint summary now without calling tools.");
   expect(compiled.text).not.toContain("codex_bind_turn");
   expect(compiled.text).not.toContain("web search, browsing, research");
@@ -513,7 +514,7 @@ test("Web compaction fails closed when its final instruction alone exceeds the t
   )).toThrow("final compaction instruction alone exceeds");
 });
 
-test("assigns prior assistant output to the model and never attributes Codex context to the human", () => {
+test("assigns prior assistant output to the model and never attributes OpenCode context to the human", () => {
   const attributed = request("max");
   attributed.context.messages = [
     { role: "user", content: "hi", timestamp: 1 },
@@ -681,14 +682,14 @@ test("the replayed context never carries a finished turn's broker handles", () =
   expect(() => JSON.parse(envelope) as unknown).not.toThrow();
 });
 
-test("requires ChatGPT-native rich results to include a safe Markdown answer for Codex", () => {
+test("requires ChatGPT-native rich results to include a safe Markdown answer for OpenCode", () => {
   const compiled = compileChatGptWebPrompt(
     request("max"),
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
   );
 
   expect(compiled.text).toContain("also provide the relevant result as ordinary Markdown in the final answer");
-  expect(compiled.text).toContain("A private ChatGPT UI widget never replaces the Markdown answer returned to Codex");
+  expect(compiled.text).toContain("A private ChatGPT UI widget never replaces the Markdown answer returned to OpenCode");
   expect(compiled.text).toContain("Never copy a ChatGPT widget's HTML, CSS, class names, or DOM markup");
 });
 
@@ -698,7 +699,7 @@ test("uses the public Instant name without leaking the browser menu alias into t
     { localToolsEnabled: false, solAvailable: true, extraHighAvailable: true, proAvailable: true },
   );
 
-  expect(compiled.text).toContain("This is ChatGPT Web Instant with no local Codex bridge");
+  expect(compiled.text).toContain("This is ChatGPT Web Instant with no local OpenCode bridge");
   expect(compiled.text).not.toContain("Instant 5.5");
 });
 

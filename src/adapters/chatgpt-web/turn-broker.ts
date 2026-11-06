@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "../../branding";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
@@ -11,6 +12,9 @@ import type { ChatGptTurnEnvironment } from "./environment";
 import { chatGptToolTimeoutError } from "./adapter-error";
 import { subagentModelObservation } from "./mcp-observation";
 
+/** Completed activity IDs remain tombstones until turn retirement, so bound the retained history. */
+export const MAX_TURN_MCP_ACTIVITY_IDS = 1_024;
+
 interface BrokerRetirementFailure {
   code: "codex_tool_timeout";
   tool: string;
@@ -22,7 +26,7 @@ function assertRetirementFailure(value: unknown): asserts value is BrokerRetirem
   if (!failure || failure.code !== "codex_tool_timeout"
     || typeof failure.tool !== "string" || !/^[A-Za-z0-9_.-]{1,256}$/.test(failure.tool)
     || !Number.isSafeInteger(failure.timeoutMs) || failure.timeoutMs! <= 0) {
-    throw new Error("Invalid Codex tool retirement failure");
+    throw new Error("Invalid OpenCode tool retirement failure");
   }
 }
 
@@ -104,6 +108,8 @@ interface TurnChannel {
   bindingId?: string;
   queuedCallIds: string[];
   deliveredCallIds: Set<string>;
+  /** Codex completes calls once; OpenCode must acknowledge identical retried native results after a lost owner RPC. */
+  openCodeCompletedToolHashes: Map<string, string>;
   invocations: Map<string, PendingInvocation>;
   waiters: Set<ToolWaiter>;
   compactionRequested: boolean;
@@ -166,7 +172,7 @@ interface BrokerRequest {
   summary?: string;
   surfaceNonce?: string;
   finalAnswer?: string;
-  contract?: "native" | "safe";
+  contract?: "native" | "safe" | "opencode";
   failure?: BrokerRetirementFailure;
 }
 
@@ -180,6 +186,11 @@ const brokers = new Map<string, TurnBroker>();
 const MAX_BROKER_LINE_CHARS = 67_108_864;
 const MAX_RETIRED_TURN_HANDLES = 64;
 const MAX_PENDING_CALL_DIAGNOSTICS = 16;
+const MAX_OPENCODE_COMPLETED_TOOL_RECEIPTS = 512;
+
+function completedToolHash(result: BrokerToolResult): string {
+  return createHash("sha256").update(JSON.stringify(result)).digest("hex");
+}
 
 function retirementDiagnostics(channel: TurnChannel): BrokerRetirementDiagnostics {
   const now = performance.now();
@@ -232,7 +243,7 @@ function errorOf(value: unknown): Error {
 }
 
 function retiredTurnLabel(traceId: string): string {
-  return traceId && traceId !== "unknown" ? `Codex turn ${traceId}` : "a Codex turn";
+  return traceId && traceId !== "unknown" ? `OpenCode turn ${traceId}` : "a OpenCode turn";
 }
 
 function environmentIdentity(environment: ChatGptTurnEnvironment): string {
@@ -367,6 +378,7 @@ export class TurnBroker implements TurnBrokerOwner {
       },
       queuedCallIds: [],
       deliveredCallIds: new Set(),
+      openCodeCompletedToolHashes: new Map(),
       invocations: new Map(),
       waiters: new Set(),
       compactionRequested: false,
@@ -431,7 +443,7 @@ export class TurnBroker implements TurnBrokerOwner {
     const channel = this.channels.get(token);
     if (!channel) throw new Error("turn token is invalid or expired");
     if (environmentIdentity(channel.environment) !== environmentIdentity(environment)) {
-      throw new Error("Codex turn environment changed during an active ChatGPT tool loop");
+      throw new Error("OpenCode turn environment changed during an active ChatGPT tool loop");
     }
     if (channel.safe?.state === "revoked") throw new Error("Zero Risk turn is already terminal");
     // A no-tool Zero Risk answer can complete before its outer Responses observer reaches this owner
@@ -462,7 +474,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (channel.safe?.state === "completed") return [];
     this.assertSafeHarnessRunning(channel);
     if (channel.compactionRequested) {
-      throw new Error("Codex context compaction superseded ordinary MCP tool delivery");
+      throw new Error("OpenCode context compaction superseded ordinary MCP tool delivery");
     }
     // Delivery is at-least-once until Codex returns the corresponding tool result. If the HTTP
     // observer disconnects after the broker handed off a batch but before the adapter journaled
@@ -499,10 +511,28 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!channel) throw new Error("turn token is invalid or expired");
     this.assertSafeHarnessRunning(channel, true);
     const invocation = channel.invocations.get(callId);
-    if (!invocation) throw new Error(`tool call is not pending: ${callId}`);
-    if (!channel.deliveredCallIds.delete(callId)) {
+    if (!invocation) {
+      const acceptedHash = channel.openCodeCompletedToolHashes.get(callId);
+      if (channel.environment.origin === "opencode" && acceptedHash !== undefined) {
+        if (completedToolHash(result) !== acceptedHash) {
+          throw new Error(`previously completed OpenCode tool result changed: ${callId}`);
+        }
+        return;
+      }
+      throw new Error(`tool call is not pending: ${callId}`);
+    }
+    if (!channel.deliveredCallIds.has(callId)) {
       throw new Error(`tool call was completed before it was delivered: ${callId}`);
     }
+    if (channel.environment.origin === "opencode") {
+      if (channel.openCodeCompletedToolHashes.size >= MAX_OPENCODE_COMPLETED_TOOL_RECEIPTS) {
+        throw new Error("OpenCode completed tool receipt capacity exceeded");
+      }
+      // Record the acceptance before resolving the website MCP promise. If the owner RPC loses
+      // its acknowledgment, a byte-identical retry can succeed without executing the tool again.
+      channel.openCodeCompletedToolHashes.set(callId, completedToolHash(result));
+    }
+    channel.deliveredCallIds.delete(callId);
     channel.invocations.delete(callId);
     console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} isError=${result.isError === true}`);
     invocation.resolve(result);
@@ -549,7 +579,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!channel) throw new Error("turn token is invalid or expired");
     this.assertSafeHarnessRunning(channel);
     if (channel.compactionRequested) {
-      throw new Error("Codex context compaction was already requested for this turn");
+      throw new Error("OpenCode context compaction was already requested for this turn");
     }
     channel.compactionRequested = true;
     channel.compactionResult = structuredClone(queuedResult);
@@ -635,10 +665,10 @@ export class TurnBroker implements TurnBrokerOwner {
     if (safe.state === "revoked") throw new Error("Zero Risk turn is already terminal");
     if (safe.state !== "running") throw new Error("Zero Risk turn has not started");
     if (channel.invocations.size > 0) {
-      throw new Error(`Zero Risk turn cannot complete with ${channel.invocations.size} pending Codex tool invocation(s)`);
+      throw new Error(`Zero Risk turn cannot complete with ${channel.invocations.size} pending OpenCode tool invocation(s)`);
     }
     if (channel.activities.size > 0) {
-      throw new Error(`Zero Risk turn cannot complete with ${channel.activities.size} active Codex MCP request(s)`);
+      throw new Error(`Zero Risk turn cannot complete with ${channel.activities.size} active OpenCode MCP request(s)`);
     }
     safe.state = "completed";
     safe.finalAnswer = finalAnswer;
@@ -680,7 +710,7 @@ export class TurnBroker implements TurnBrokerOwner {
     return this.waitForSafeState(safe.completionWaiters, signal, "Zero Risk turn completion wait aborted");
   }
 
-  revoke(token: string, reason = new Error("Codex turn binding was revoked"), failure?: BrokerRetirementFailure): void {
+  revoke(token: string, reason = new Error("OpenCode turn binding was revoked"), failure?: BrokerRetirementFailure): void {
     const channel = this.channels.get(token);
     if (!channel) return;
     const diagnostics = retirementDiagnostics(channel);
@@ -718,7 +748,7 @@ export class TurnBroker implements TurnBrokerOwner {
     return tokens.length;
   }
 
-  revokeTrace(traceId: string, reason = new Error("Codex turn binding was revoked")): number {
+  revokeTrace(traceId: string, reason = new Error("OpenCode turn binding was revoked")): number {
     const tokens = [...this.channels]
       .filter(([, channel]) => channel.traceId === traceId)
       .map(([token]) => token);
@@ -762,7 +792,7 @@ export class TurnBroker implements TurnBrokerOwner {
     }
     if (safe.state !== "running") throw new Error("Zero Risk turn is already terminal");
     if (channel.compactionRequested && !allowCompaction) {
-      throw new Error("Zero Risk turn is awaiting completion for Codex context compaction");
+      throw new Error("Zero Risk turn is awaiting completion for OpenCode context compaction");
     }
   }
 
@@ -1117,7 +1147,7 @@ export class TurnBroker implements TurnBrokerOwner {
       if (!activeChannel) {
         throw new Error(retiredTurn !== undefined
           ? `${contract === "safe" ? "This request_id" : "This turn_token"} was issued for ${retiredTurnLabel(retiredTurn)}, which has already finished.`
-          + " This Codex Native action can no longer run."
+          + " This OpenCode Native action can no longer run."
           : `${contract === "safe" ? "request id" : "turn token"} is invalid, expired, or revoked. `
           + `Copy ${contract === "safe" ? "request_id" : "turn_token"} exactly from the current request; do not guess or reuse an earlier value.`);
       }
@@ -1138,12 +1168,30 @@ export class TurnBroker implements TurnBrokerOwner {
       } else if (contract === "safe") {
         throw new Error("Zero Risk MCP contract requires a Zero Risk request id");
       }
+      // The upstream Codex broker accepts native capabilities. OpenCode adds a separate
+      // signed request path: never let either website connector claim the other's turn.
+      if (activeChannel.environment.origin === "opencode" && contract !== "opencode") {
+        throw new Error("OpenCode turn requires the OpenCode MCP contract");
+      }
+      if (activeChannel.environment.origin !== "opencode" && contract === "opencode") {
+        throw new Error("OpenCode MCP contract requires an authenticated OpenCode turn");
+      }
       if (typeof request.activityId !== "string" || !/^activity_[A-Za-z0-9_-]{16,128}$/.test(request.activityId)) {
         throw new Error("turn activity id is invalid");
       }
       const activityId = request.activityId;
       if (activeChannel.completedActivities.has(activityId)) {
         throw new Error("turn activity was already completed before this claim settled");
+      }
+      if (!activeChannel.activities.has(activityId)
+        && activeChannel.activities.size + activeChannel.completedActivities.size >= MAX_TURN_MCP_ACTIVITY_IDS) {
+        throw new Error("turn activity capacity exceeded; retire this turn and start a new one");
+      }
+      // Codex's Zero Risk turn drops its registration deadline once the trusted
+      // connector starts running. OpenCode likewise keeps an authenticated,
+      // claimed website turn alive until its native owner revokes or retires it.
+      if (activeChannel.environment.origin === "opencode") {
+        delete activeChannel.environment.expiresAt;
       }
       if (!activeChannel.activities.has(activityId)) {
         activeChannel.activities.add(activityId);
@@ -1177,7 +1225,11 @@ export class TurnBroker implements TurnBrokerOwner {
       if (channel.completedActivities.has(request.activityId)) {
         return { completed: false, duplicate: true };
       }
-      const wasActive = channel.activities.delete(request.activityId);
+      const wasActive = channel.activities.has(request.activityId);
+      if (!wasActive && channel.activities.size + channel.completedActivities.size >= MAX_TURN_MCP_ACTIVITY_IDS) {
+        throw new Error("turn activity capacity exceeded; retire this turn and start a new one");
+      }
+      if (wasActive) channel.activities.delete(request.activityId);
       channel.completedActivities.add(request.activityId);
       // A cleanup that overtakes an ambiguously delivered claim is still a causal event. Its
       // tombstone makes the delayed claim fail instead of resurrecting activity after a fence.
@@ -1200,8 +1252,8 @@ export class TurnBroker implements TurnBrokerOwner {
         + ` retiredTurn=${retiredTurn?.traceId ?? "unknown"})`,
       );
       throw new Error(retiredTurn !== undefined
-        ? `${retiredTurnLabel(retiredTurn.traceId)} has already finished; this Codex Native action can no longer run.`
-        : "internal Codex turn binding is invalid or expired");
+        ? `${retiredTurnLabel(retiredTurn.traceId)} has already finished; this OpenCode Native action can no longer run.`
+        : "internal OpenCode turn binding is invalid or expired");
     }
     if (request.method === "release") {
       if (request.failure !== undefined) {
@@ -1218,7 +1270,7 @@ export class TurnBroker implements TurnBrokerOwner {
     this.assertSafeHarnessRunning(binding.channel);
     if (binding.channel.compactionRequested) {
       const result = binding.channel.compactionResult;
-      if (!result) throw new Error("Codex context compaction control result is unavailable");
+      if (!result) throw new Error("OpenCode context compaction control result is unavailable");
       binding.channel.compactionDeliveryCount += 1;
       binding.channel.onCompactionProgress?.();
       console.info(
@@ -1310,6 +1362,7 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.invocations.clear();
     channel.queuedCallIds = [];
     channel.deliveredCallIds.clear();
+    channel.openCodeCompletedToolHashes.clear();
   }
 
   private prune(): void {
@@ -1439,7 +1492,7 @@ export class RemoteTurnBroker implements TurnBrokerOwner {
       status = await callTurnBroker(this.socketPath, { method: "owner_status" });
     } catch (error) {
       throw new Error(
-        "The running launcher runtime does not expose the DEV turn-owner protocol; update and restart Codex Web GPT once before using the working-tree DEV chat"
+        `The running launcher runtime does not expose the DEV turn-owner protocol; update and restart ${PRODUCT_NAME} once before using the working-tree DEV chat`
         + ` (${error instanceof Error ? error.message : String(error)})`,
       );
     }

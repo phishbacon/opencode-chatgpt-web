@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { defaultConfig } from "../src/config";
 import { inspectCodexCompaction } from "../src/doctor-compaction";
 
-test("doctor warns about saved compaction overrides without changing Codex settings", () => {
+test("doctor warns about saved compaction overrides without changing OpenCode settings", () => {
   const root = mkdtempSync(join(tmpdir(), "cgw-compaction-doctor-"));
   const path = join(root, "config.toml");
   const config = defaultConfig("browser-only");

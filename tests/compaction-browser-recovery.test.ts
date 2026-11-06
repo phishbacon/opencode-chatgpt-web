@@ -40,7 +40,7 @@ test.each([
     mainFrame: () => frame,
   });
   const worker = Object.assign(Object.create(ChatGptBrowserWorker.prototype), {
-    config: { appName: "Codex Native2", browserDiagnosticsPath: diagnostics, ...(owned ? { browserHostDescriptorPath: "owned-descriptor" } : {}) },
+    config: { appName: "OpenCode Native2", browserDiagnosticsPath: diagnostics, ...(owned ? { browserHostDescriptorPath: "owned-descriptor" } : {}) },
     runStage: async (_trace: string, name: string, timeout: number, action: (signal: AbortSignal) => Promise<unknown>) => {
       stage = name;
       if (name === "send" || name.endsWith("_send")) sendBudgets.push(timeout);

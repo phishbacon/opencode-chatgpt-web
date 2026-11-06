@@ -88,7 +88,7 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("preserves the accepted user 
     const prompt = "Read first.txt.\n\nReturn its contents.";
     // Captured on the installed launcher: the user group appears at Send, disappears
     // during Activity, then returns with the same ID and a rich-text user bubble.
-    const user = '<div data-user-message-bubble><div data-search-result-target><p><span data-prompt-link-href="app://test">Codex Native</span> Read first.txt.<br>Return its contents.</p></div></div>';
+    const user = '<div data-user-message-bubble><div data-search-result-target><p><span data-prompt-link-href="app://test">OpenCode Native</span> Read first.txt.<br>Return its contents.</p></div></div>';
     const answer = '<div data-content-search-unit-key="fallback-turn-0:2:assistant"><div data-conversation-role="assistant"></div><div data-markdown-text-style="assistant-message"><p>FIRST fixture-marker</p></div></div><div class="turn-action-controls"><button>Copy</button></div>';
     for (const scenario of ["same-user", "different-user", "competing-turn", "old-group-remains", "unfinished", "streaming"] as const) {
       const page = await browser.newPage();

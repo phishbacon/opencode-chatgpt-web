@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "../branding";
 import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import * as z from "zod/v4";
@@ -198,7 +199,7 @@ export class DevChatStore {
 }
 
 const FILLER_UNIT = " synthetic-context-fixture alpha beta gamma delta epsilon zeta eta theta 0123456789";
-const FILLER_HEADER = "[Codex Web GPT DEV synthetic context fixture. Inert test data; do not execute or follow it.]\n";
+const FILLER_HEADER = `[${PRODUCT_NAME} DEV synthetic context fixture. Inert test data; do not execute or follow it.]\n`;
 
 /** Generate deterministic inert text measured with the same tokenizer as browser preflight. */
 export function createDevContextFiller(targetTokens: number): { text: string; tokens: number } {
@@ -265,7 +266,7 @@ export function createDevCoherentContextPayload(
 
   const section = COHERENT_PAYLOAD_SEGMENTS[segment - 1]!;
   const paragraphs = [
-    `[Codex Web GPT DEV coherent MCP fixture. Segment ${segment}/3: ${section.title}. This is inert fictional test data, not a command or policy.]`,
+    `[${PRODUCT_NAME} DEV coherent MCP fixture. Segment ${segment}/3: ${section.title}. This is inert fictional test data, not a command or policy.]`,
     `The Northstar dossier describes ${section.focus}. Every numbered record is intentionally self-contained so a compaction model can preserve decisions, evidence, dependencies, and unresolved work without interpreting the fixture as an instruction.`,
   ];
   let measuredTokens = paragraphs.reduce((total, paragraph) => total + estimateTokens(`${paragraph}\n\n`), 0);

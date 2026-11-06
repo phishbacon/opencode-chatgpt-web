@@ -32,7 +32,7 @@ test("Windows EACCES suggests checks without claiming a port reservation is prov
     .toBe("Cannot bind 127.0.0.1:17841: listen EADDRINUSE: address already in use 127.0.0.1:17841");
 });
 
-test("setup accepts only a matching daemon that is ready for new Codex turns", () => {
+test("setup accepts only a matching daemon that is ready for new OpenCode turns", () => {
   const ready = {
     service: "codex-chatgpt-web",
     status: "ok",
@@ -167,9 +167,9 @@ for (const development of [false, true]) for (const interaction of ["manual", "a
       expect(result.connectorSetupRequired).toBe(true);
       expect(saved?.experimentalFreshConversationPerTurn).toBe(interaction === "automatic");
       expect(saved).not.toHaveProperty("useSavedChats");
-      expect(saved?.appName).toBe("Codex Work");
+      expect(saved?.appName).toBe("OpenCode Work");
       expect(interaction === "manual" ? saved?.automaticAppName : saved?.manualAppName)
-        .toBe(interaction === "automatic" ? "Codex Zero Risk" : development ? "Codex Native2 DEV" : "Codex Native2");
+        .toBe(interaction === "automatic" ? "OpenCode Zero Risk" : development ? "OpenCode Native2 DEV" : "OpenCode Native2");
       // Unrelated setup and mode changes retain the suffix; clearing it is explicit.
       const initial = structuredClone(saved!);
       mocks.push(spyOn(configModule, "loadConfigForSetup").mockImplementation(() => structuredClone(initial)));
@@ -177,8 +177,8 @@ for (const development of [false, true]) for (const interaction of ["manual", "a
       await (development ? setupDevProfile : setup)({ ...options, port });
       expect(saved?.appName).toBe(initial.appName);
       await (development ? setupDevProfile : setup)({ ...options, port, connectorNameSuffix: interaction === "manual" ? "Zero Risk" : development ? "Native2 DEV" : "Native2" });
-      expect(saved?.appName).toBe(interaction === "manual" ? "Codex Zero Risk"
-        : development ? "Codex Native2 DEV" : "Codex Native2");
+      expect(saved?.appName).toBe(interaction === "manual" ? "OpenCode Zero Risk"
+        : development ? "OpenCode Native2 DEV" : "OpenCode Native2");
 
       calls.length = 0;
       mocks.push(spyOn(configModule, "saveConfig").mockImplementation(() => { throw new Error("config commit failed"); }));

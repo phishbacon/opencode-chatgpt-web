@@ -100,7 +100,7 @@ describe("native /models augmentation", () => {
     }, { ...config, proAvailable: false })).toThrow("Cannot group different context budgets");
   });
 
-  test("publishes Bigger Context limits in the Codex model catalog", () => {
+  test("publishes Bigger Context limits in the OpenCode model catalog", () => {
     const config = defaultConfig("full");
     config.extraHighAvailable = true;
     config.proAvailable = true;
@@ -295,7 +295,7 @@ describe("native /models augmentation", () => {
     });
   });
 
-  test("raises only native maximum windows for an explicit Codex context override", () => {
+  test("raises only native maximum windows for an explicit OpenCode context override", () => {
     const native = source();
     const nativeSnapshot = structuredClone(native);
     const config = defaultConfig("full");
@@ -328,7 +328,7 @@ describe("native /models augmentation", () => {
     }
   });
 
-  test("never lowers a native window that already exceeds the Codex context override", () => {
+  test("never lowers a native window that already exceeds the OpenCode context override", () => {
     const native = source();
     const models = native.models as Array<Record<string, unknown>>;
     models[1]!.max_context_window = 1_000_000;

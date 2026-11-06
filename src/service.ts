@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./branding";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
@@ -95,7 +96,7 @@ function assertMacOs(): void {
   if (process.platform !== "darwin") {
     throw new Error(
       "Terminal-managed background services require macOS. "
-      + "Use the Codex Web GPT launcher on Windows or Linux.",
+      + `Use the ${PRODUCT_NAME} launcher on Windows or Linux.`,
     );
   }
 }

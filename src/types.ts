@@ -1,3 +1,5 @@
+import type { OpenCodeTurnClaims } from "./opencode/turn-binding";
+
 export interface CodexParsedRequest {
   modelId: string;
   previousResponseId?: string;
@@ -7,6 +9,8 @@ export interface CodexParsedRequest {
   _rawBody?: unknown;
   /** Set only by the trusted Web route, never parsed from caller-supplied model metadata. */
   _chatgptModelFamily?: "5.6" | "6";
+  /** Authenticated OpenCode owner, attached inside the bridge after signature verification. */
+  _openCodeTurn?: Readonly<OpenCodeTurnClaims>;
   /** Number of leading raw input items restored from local previous_response_id state. */
   _replayPrefixLen?: number;
   /**

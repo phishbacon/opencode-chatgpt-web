@@ -31,7 +31,7 @@ test("Zero Risk prompt carries only a neutral request id while MCP metadata owns
     manualControl: true,
   });
   expect(compiled.multipart).toBeUndefined();
-  expect(compiled.text).toContain('The selected local Codex plugin for this turn is "Codex Zero Risk".');
+  expect(compiled.text).toContain('The selected local OpenCode plugin for this turn is "OpenCode Zero Risk".');
   expect(compiled.text).toContain("<codex_zero_risk_request_json>");
   expect(compiled.text).toContain(`\"request_id\":\"${requestId}\"`);
   expect(compiled.text).not.toContain("turn_token");
@@ -41,15 +41,15 @@ test("Zero Risk prompt carries only a neutral request id while MCP metadata owns
   expect(compiled.text).not.toContain("exactly once");
   expect(compiled.text).not.toContain("codex_turn_start");
   expect(compiled.text).not.toContain("codex_turn_complete");
-  expect(compiled.text).not.toContain("ChatGPT Web Medium with no local Codex bridge");
+  expect(compiled.text).not.toContain("ChatGPT Web Medium with no local OpenCode bridge");
 });
 
 test("custom Zero Risk plugin is named in normal and compaction requests without automatic turn tokens", () => {
   for (const compaction of [false, true]) {
     const compiled = compileChatGptWebPrompt(request(compaction), capabilities, requestId, {
-      manualControl: true, appName: "Codex Manual Work",
+      manualControl: true, appName: "OpenCode Manual Work",
     });
-    expect(compiled.text).toContain('The selected local Codex plugin for this turn is "Codex Manual Work".');
+    expect(compiled.text).toContain('The selected local OpenCode plugin for this turn is "OpenCode Manual Work".');
     expect(compiled.text).not.toContain("Codex Native");
     expect(compiled.text).not.toContain("turn_token");
     expect(compiled.text).toContain(`"request_id":"${requestId}"`);
@@ -60,7 +60,7 @@ test("Zero Risk compaction prompt stays task-focused while MCP metadata owns com
   const compiled = compileChatGptWebPrompt(request(true), capabilities, requestId, {
     manualControl: true,
   });
-  expect(compiled.text).toContain("This is a Codex history-compaction checkpoint");
+  expect(compiled.text).toContain("This is a OpenCode history-compaction checkpoint");
   expect(compiled.text).toContain("Do not call work tools or ChatGPT-native tools");
   expect(compiled.text).toContain("Produce the requested checkpoint summary now");
   expect(compiled.text).not.toContain("codex_turn_start");
@@ -70,7 +70,7 @@ test("Zero Risk compaction prompt stays task-focused while MCP metadata owns com
 test("Zero Risk prompt fails closed without Full harness or an exact manual binding", () => {
   expect(() => compileChatGptWebPrompt(request(), { ...capabilities, localToolsEnabled: false }, requestId, {
     manualControl: true,
-  })).toThrow("requires the Full Codex harness");
+  })).toThrow("requires the Full OpenCode harness");
   expect(() => compileChatGptWebPrompt(request(), capabilities, undefined, {
     manualControl: true,
   })).toThrow("requires a broker request id");
@@ -88,7 +88,7 @@ test("active Zero Risk compaction returns its checkpoint through the bound compl
   expect(automatic.toLowerCase()).toContain("call no more tools");
   expect(automatic).not.toContain("codex_turn_complete");
   expect(safe).toContain("codex_turn_complete");
-  expect(safe).toContain("Return only the complete checkpoint summary to Codex");
+  expect(safe).toContain("Return only the complete checkpoint summary to OpenCode");
   expect(safe).toContain("CONTEXT CHECKPOINT COMPACTION");
   expect(safe).not.toContain("separate structured compaction handoff request");
 });

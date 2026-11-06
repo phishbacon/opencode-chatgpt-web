@@ -130,9 +130,9 @@ export function setCodexSubagentProtocol(
   protocol: AppConfig["subagentProtocol"],
 ): CodexIntegrationJournal {
   const status = inspectCodexIntegration();
-  if (!status.installed) throw new Error("Codex integration is not installed; run setup first");
+  if (!status.installed) throw new Error("OpenCode integration is not installed; run setup first");
   if (!status.active) {
-    throw new Error("Codex integration is disconnected; reconnect it before changing the subagent protocol");
+    throw new Error("OpenCode integration is disconnected; reconnect it before changing the subagent protocol");
   }
   const nextConfig = { ...config, subagentProtocol: protocol };
   // The runtime catalog and Codex feature surface are two halves of one protocol selection. If
@@ -181,7 +181,7 @@ export function preflightCodexIntegration(
   if (existing && existing.version !== 2) {
     if (!configExists) {
       if (options.replaceExistingRoute !== true) {
-        throw new Error(`Codex config is missing: ${configPath}`);
+        throw new Error(`OpenCode config is missing: ${configPath}`);
       }
       installConfiguredRoute("", installedUrl, config, true, true);
       return;
@@ -244,7 +244,7 @@ export function installCodexIntegration(
 
   const hasManagedJournal = Boolean(existing && existing.version !== 2);
   if (hasManagedJournal && !configExists && options.replaceExistingRoute !== true) {
-    throw new Error(`Codex config is missing: ${configPath}`);
+    throw new Error(`OpenCode config is missing: ${configPath}`);
   }
 
   if (hasManagedJournal && existing && existing.version !== 2) {
@@ -355,10 +355,10 @@ export function deactivateCodexIntegration(options: { forRuntimeRecovery?: boole
   const existing = readJournal();
   if (!existing) return { changed: false, active: false };
   if (existing.version === 2) {
-    throw new Error("Legacy Codex integration must be upgraded by Setup before the bridge can be disconnected");
+    throw new Error("Legacy OpenCode integration must be upgraded by Setup before the bridge can be disconnected");
   }
   assertJournalTargetsConfig(existing, getCodexConfigPath());
-  if (!existsSync(existing.configPath)) throw new Error(`Codex config is missing: ${existing.configPath}`);
+  if (!existsSync(existing.configPath)) throw new Error(`OpenCode config is missing: ${existing.configPath}`);
   const current = readFileSync(existing.configPath, "utf8");
   if ((existing.version === 4 || existing.version === 5 || existing.version === 6 || existing.version === 7 || existing.version === 8 || existing.version === 9 || existing.version === 10) && !existing.active) {
     verifyRestoredRoute(current, existing);
@@ -389,12 +389,12 @@ export function deactivateCodexIntegration(options: { forRuntimeRecovery?: boole
 
 export function activateCodexIntegration(options: { recoveryOnly?: boolean } = {}): SetCodexIntegrationActiveResult {
   const existing = readJournal();
-  if (!existing) throw new Error("Codex integration is not installed");
+  if (!existing) throw new Error("OpenCode integration is not installed");
   if (existing.version === 2) {
-    throw new Error("Legacy Codex integration must be upgraded by Setup before the bridge can be reconnected");
+    throw new Error("Legacy OpenCode integration must be upgraded by Setup before the bridge can be reconnected");
   }
   assertJournalTargetsConfig(existing, getCodexConfigPath());
-  if (!existsSync(existing.configPath)) throw new Error(`Codex config is missing: ${existing.configPath}`);
+  if (!existsSync(existing.configPath)) throw new Error(`OpenCode config is missing: ${existing.configPath}`);
   const current = readFileSync(existing.configPath, "utf8");
   if (existing.version === 10 && existing.active) {
     verifyInstalledRoute(current, existing);
@@ -458,7 +458,7 @@ export function activateCodexIntegration(options: { recoveryOnly?: boolean } = {
 export function uninstallCodexIntegration(): UninstallCodexIntegrationResult {
   const journal = readJournal();
   if (!journal) return { changed: false };
-  if (!existsSync(journal.configPath)) throw new Error(`Codex config is missing: ${journal.configPath}`);
+  if (!existsSync(journal.configPath)) throw new Error(`OpenCode config is missing: ${journal.configPath}`);
   const current = readFileSync(journal.configPath, "utf8");
   let restored: string;
   if (journal.version === 2) {
@@ -495,7 +495,7 @@ export function uninstallCodexIntegration(): UninstallCodexIntegrationResult {
     }
     const primary = error instanceof Error ? error.message : String(error);
     throw new Error(rollbackFailures.length > 0
-      ? `${primary}; Codex integration rollback also failed: ${rollbackFailures.join("; ")}`
+      ? `${primary}; OpenCode integration rollback also failed: ${rollbackFailures.join("; ")}`
       : primary);
   }
   return { changed: true };
@@ -525,10 +525,10 @@ export function inspectCodexIntegration(): {
         const lines = splitLines(text);
         for (const key of ["model_provider", "model_catalog_json"] as const) {
           if (findTopLevelAssignment(lines, key).value !== journal.installed[key]) {
-            errors.push(`Codex ${key} no longer matches this installation`);
+            errors.push(`OpenCode ${key} no longer matches this installation`);
           }
         }
-        if (!text.includes(journal.providerBlock)) errors.push("Managed legacy Codex provider block no longer matches this installation");
+        if (!text.includes(journal.providerBlock)) errors.push("Managed legacy OpenCode provider block no longer matches this installation");
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));

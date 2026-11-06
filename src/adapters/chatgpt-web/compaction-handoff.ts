@@ -25,7 +25,7 @@ function brokerContent(content: string | CodexContentPart[]): unknown[] {
     if (part.type === "text") return { type: "text", text: part.text };
     const parsed = parseDataUrl(part.imageUrl);
     if (parsed) return { type: "image", data: parsed.base64, mimeType: parsed.mediaType };
-    return { type: "resource_link", uri: part.imageUrl, name: "Codex tool image", mimeType: "image/*" };
+    return { type: "resource_link", uri: part.imageUrl, name: "OpenCode tool image", mimeType: "image/*" };
   });
 }
 
@@ -121,7 +121,7 @@ function currentToolResults(
   for (const message of parsed.context.messages) {
     if (message.role !== "toolResult" || !session.hasOutstanding(message.toolCallId)) continue;
     if (results.has(message.toolCallId)) {
-      throw new Error(`Codex returned duplicate results for tool call ${message.toolCallId}`);
+      throw new Error(`OpenCode returned duplicate results for tool call ${message.toolCallId}`);
     }
     results.set(message.toolCallId, message);
   }
@@ -180,7 +180,7 @@ export async function settleActiveCompactionSource(
     const results = currentToolResults(parsed, source);
     if (results.size !== outstanding.length) {
       throw new Error(
-        `Codex supplied ${results.size} of ${outstanding.length} required tool results for compaction`,
+        `OpenCode supplied ${results.size} of ${outstanding.length} required tool results for compaction`,
       );
     }
     let token: string | undefined;
@@ -237,7 +237,7 @@ export async function settleActiveZeroRiskCompactionSource(
     const results = currentToolResults(parsed, source);
     if (results.size !== outstanding.length) {
       throw new Error(
-        `Codex supplied ${results.size} of ${outstanding.length} required tool results for Zero Risk compaction`,
+        `OpenCode supplied ${results.size} of ${outstanding.length} required tool results for Zero Risk compaction`,
       );
     }
     let token: string | undefined;
@@ -338,7 +338,7 @@ export async function requestRetainedCompactionHandoff(
       // The control handler accepts the summary before replying to ChatGPT. A fully
       // settled response without that receipt cannot become a successful checkpoint.
       throw new ChatGptWebAdapterError(
-        "ChatGPT finished without sending the context summary to Codex. Check its response for a refusal or tool error.",
+        "ChatGPT finished without sending the context summary to OpenCode. Check its response for a refusal or tool error.",
         { status: 409, errorType: "invalid_request_error", code: "compaction_handoff_missing", retryable: false },
       );
     });

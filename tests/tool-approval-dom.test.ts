@@ -7,9 +7,9 @@ const domTest = test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER);
 // Semantic fixture from the Oct 19 screenshot/AX text and the saved role=alert
 // checkpoint. This models the permission card, not a verbatim HTML capture.
 const inlineApproval = `<div>
-  <div>Codex Native2</div>
-  <div role="alert"><p>Allow ChatGPT to use Codex Native2?</p>
-    <p>ChatGPT will call Codex Native2's Run a native Codex command tool. <button>See details</button></p></div>
+  <div>OpenCode Native2</div>
+  <div role="alert"><p>Allow ChatGPT to use OpenCode Native2?</p>
+    <p>ChatGPT will call OpenCode Native2's Run a native OpenCode command tool. <button>See details</button></p></div>
   <button>Always allow</button><button>Deny</button>
   <div><button>Allow once</button><button aria-label="Approval options">⌄</button></div>
 </div>`;
@@ -25,7 +25,7 @@ domTest("the current inline permission card explains the setting even when the c
     await page.locator("button").evaluateAll(buttons => buttons.forEach(button => {
       (button as HTMLElement).onclick = () => { document.body.dataset.clicked = button.textContent!; };
     }));
-    for (const configuredName of ["Codex Native2", "Codex app"]) {
+    for (const configuredName of ["OpenCode Native2", "OpenCode app"]) {
       // An unowned surface must never gain automatic-click authority from this diagnosis.
       expect(await resolveChatGptToolConfirmation(page, configuredName, true)).toBeFalse();
       await expect(throwIfChatGptToolApprovalRequired(page.locator('[data-turn-key="current"]')))
@@ -44,7 +44,7 @@ domTest("permission diagnosis ignores old turns, hidden cards, quoted answers, a
       `<div class="markdown">${inlineApproval}</div>`,
       `<div data-user-message-bubble>${inlineApproval}</div>`,
       '<div role="alert">Something went wrong</div>',
-      '<p>Allow ChatGPT to use Codex Native2?</p>',
+      '<p>Allow ChatGPT to use OpenCode Native2?</p>',
     ]) {
       await page.setContent(`<div data-turn-key="old">${inlineApproval}</div><div data-turn-key="current">${content}</div>`);
       await expect(throwIfChatGptToolApprovalRequired(page.locator('[data-turn-key="current"]'))).resolves.toBeUndefined();
@@ -56,7 +56,7 @@ domTest("an unanswered recognized approval reports the setting and leaves all pe
   await withPage(async page => {
     await page.setContent(card());
     const pending: boolean[] = [];
-    await expect(resolveChatGptToolConfirmation(page, "Codex Native2", false, undefined, 10,
+    await expect(resolveChatGptToolConfirmation(page, "OpenCode Native2", false, undefined, 10,
       undefined, async value => { pending.push(value); })).rejects.toMatchObject({
         code: "chatgpt_tool_approval_required", retryable: false,
       });
@@ -67,7 +67,7 @@ domTest("an unanswered recognized approval reports the setting and leaves all pe
 }, 20_000);
 
 // Structure reported in #768: the owned surface contains an alert and a split button.
-function card(app = "Codex Native2", actions = "Allow once", attribute = 'data-codex-approval-surface="true"') {
+function card(app = "OpenCode Native2", actions = "Allow once", attribute = 'data-codex-approval-surface="true"') {
   return `<section ${attribute}><div role="alert"><p>Allow ChatGPT to use ${app}?</p>
     <button onclick="this.closest('section').remove()">Deny</button>
     <div><button onclick="document.body.dataset.chosen=this.textContent;this.closest('section').remove()">${actions}</button>
@@ -77,8 +77,8 @@ function card(app = "Codex Native2", actions = "Allow once", attribute = 'data-c
 domTest("current and earlier approval surfaces select only the visible one-time action", async () => {
   await withPage(async page => {
     for (const attribute of ['data-codex-approval-surface="true"', 'role="dialog"', 'data-testid="tool-approval-card"']) {
-      await page.setContent(card("Codex Native2", "Allow once", attribute) + '<button hidden>Allow once</button>');
-      expect(await resolveChatGptToolConfirmation(page, "Codex Native2", true)).toBeTrue();
+      await page.setContent(card("OpenCode Native2", "Allow once", attribute) + '<button hidden>Allow once</button>');
+      expect(await resolveChatGptToolConfirmation(page, "OpenCode Native2", true)).toBeTrue();
       expect(await page.locator("body").getAttribute("data-chosen")).toBe("Allow once");
     }
   });
@@ -86,15 +86,15 @@ domTest("current and earlier approval surfaces select only the visible one-time 
 
 domTest("approval cannot choose another connector, a quoted alert, or ambiguous permission controls", async () => {
   await withPage(async page => {
-    for (const html of [card("GitHub"), card("Codex Native2 extra"), card("Codex Native2", "Allow once", 'class="answer-text"')]) {
+    for (const html of [card("GitHub"), card("OpenCode Native2 extra"), card("OpenCode Native2", "Allow once", 'class="answer-text"')]) {
       await page.setContent(html);
-      expect(await resolveChatGptToolConfirmation(page, "Codex Native2", true)).toBeFalse();
+      expect(await resolveChatGptToolConfirmation(page, "OpenCode Native2", true)).toBeFalse();
       expect(await page.locator("body").getAttribute("data-chosen")).toBeNull();
     }
     for (const html of [card() + card(), card().replace("</section>", "<button>Allow once</button></section>")]) {
       await page.setContent(html);
       let failure: unknown;
-      try { await resolveChatGptToolConfirmation(page, "Codex Native2", true); } catch (error) { failure = error; }
+      try { await resolveChatGptToolConfirmation(page, "OpenCode Native2", true); } catch (error) { failure = error; }
       expect(failure).toBeInstanceOf(Error);
       expect(await page.locator("body").getAttribute("data-chosen")).toBeNull();
     }
@@ -108,7 +108,7 @@ domTest("a pending current approval stays manual and respects cancellation", asy
     const pending: boolean[] = [];
     let failure: unknown;
     try {
-      await resolveChatGptToolConfirmation(page, "Codex Native2", false, controller.signal, 1_000,
+      await resolveChatGptToolConfirmation(page, "OpenCode Native2", false, controller.signal, 1_000,
         undefined, async value => { pending.push(value); if (value) controller.abort(); });
     } catch (error) { failure = error; }
     expect(failure).toMatchObject({ name: "AbortError" });
@@ -125,7 +125,7 @@ domTest("an approval waits for its actions to finish mounting", async () => {
       buttons.forEach(button => { button.hidden = true; });
       setTimeout(() => buttons.forEach(button => { button.hidden = false; }), 100);
     });
-    expect(await resolveChatGptToolConfirmation(page, "Codex Native2", true)).toBeTrue();
+    expect(await resolveChatGptToolConfirmation(page, "OpenCode Native2", true)).toBeTrue();
     expect(await page.locator("section").count()).toBe(0);
     expect(await page.locator("body").getAttribute("data-chosen")).toBe("Allow once");
   });
@@ -141,7 +141,7 @@ domTest("automatic approval waits for the requesting message to finish streaming
         button.closest("section")!.remove();
       };
     });
-    const approval = resolveChatGptToolConfirmation(page, "Codex Native2", true, undefined, 2_000);
+    const approval = resolveChatGptToolConfirmation(page, "OpenCode Native2", true, undefined, 2_000);
     await page.waitForTimeout(150);
     expect(await page.locator("body").getAttribute("data-chosen")).toBeNull();
     await page.getByTestId("stop-button").evaluate(button => button.remove());
@@ -155,7 +155,7 @@ domTest("streaming approval timeout and cancellation never click a permission bu
     for (const cancel of [false, true]) {
       await page.setContent(card() + '<button data-testid="stop-button">Stop</button>');
       const signal = cancel ? AbortSignal.timeout(100) : undefined;
-      await expect(resolveChatGptToolConfirmation(page, "Codex Native2", true, signal, 200)).rejects.toThrow();
+      await expect(resolveChatGptToolConfirmation(page, "OpenCode Native2", true, signal, 200)).rejects.toThrow();
       expect(await page.locator("body").getAttribute("data-chosen")).toBeNull();
       expect(await page.locator("section").count()).toBe(1);
     }

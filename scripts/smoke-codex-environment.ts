@@ -14,7 +14,7 @@ import type { AdapterEvent } from "../src/types";
 // provenance and takes a different recovery path, hiding the same-turn steering regression.
 // Model responses and credentials are fixtures; no real account or browser is used.
 const codex = resolve(process.argv[2] ?? "/Applications/ChatGPT.app/Contents/Resources/codex");
-if (!existsSync(codex)) throw new Error(`Codex executable is missing: ${codex}`);
+if (!existsSync(codex)) throw new Error(`OpenCode executable is missing: ${codex}`);
 const bundled = spawnSync(codex, ["debug", "models", "--bundled"], { encoding: "utf8", timeout: 15_000 });
 if (bundled.status !== 0) throw new Error(`Could not read bundled models: ${bundled.stderr}`);
 

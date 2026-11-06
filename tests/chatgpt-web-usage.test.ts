@@ -56,7 +56,7 @@ test.each([undefined, 2] as const)("context diagnostics separate instructions fr
 test("usage counts the configured plugin name carried by the submitted prompt", () => {
   const parsed = request("Inspect the repository.");
   const caps = { ...capabilities, localToolsEnabled: true };
-  const appName = `Codex ${"測試_".repeat(16)}`;
+  const appName = `OpenCode ${"測試_".repeat(16)}`;
   const token = `turn_${"0".repeat(32)}`;
   const compiled = compileChatGptWebPrompt(parsed, caps, token, { appName });
   const expected = estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId);

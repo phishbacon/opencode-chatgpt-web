@@ -19,6 +19,6 @@ test("supported launcher locales return complete, nonempty dictionaries", () => 
       expect(placeholders(translated[key])).toEqual(placeholders(english[key]));
     }
     expect(translated.biggerContextBody).not.toContain("TXT");
-    expect(translated.manualPromptInstruction).toContain("Codex Zero Risk");
+    expect(translated.manualPromptInstruction).toContain("OpenCode Zero Risk");
   }
 });

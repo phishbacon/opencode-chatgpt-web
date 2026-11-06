@@ -1,13 +1,28 @@
+import { PRODUCT_NAME } from "../branding";
 import { createInterface } from "node:readline/promises";
 import { existsSync } from "node:fs";
 import { stdin, stdout } from "node:process";
-import { DEV_CHATGPT_CONNECTOR_NAME, loadConfig } from "../config";
+import { DEV_CHATGPT_CONNECTOR_NAME, loadConfig, type AppConfig } from "../config";
+import { openCodeWebsiteConnectorName } from "../opencode/website-connector";
 import {
   inspectLauncherBrowserHost,
   inspectLauncherBrowserHostLiveness,
   readLauncherBrowserHostDescriptor,
 } from "../launcher-browser-host";
 import { setupDevProfile } from "../setup";
+import { TurnBroker } from "../adapters/chatgpt-web/turn-broker";
+import { OpenCodeTurnVerifier } from "../opencode/turn-binding";
+import { assertOpenCodeDevListenerConfig } from "../opencode/dev-listener";
+import {
+  prepareOpenCodeDevHost,
+  openCodeDevHostPaths,
+  openCodeListenerRunning,
+  runOpenCodeDevHost,
+  readOpenCodeDevHostKey,
+  readOpenCodeDevHostPort,
+  readOpenCodeDevHostStatus,
+} from "../opencode/dev-host";
+import { startServer } from "../server";
 import { tunnelStatus } from "../tunnel";
 import {
   createLauncherDevAdapter,
@@ -31,13 +46,16 @@ import {
 } from "./profile";
 import { DEV_CONFIG_PURPOSE, DEV_LAUNCHER_PROFILE } from "./constants";
 
-const DEV_HELP = `Codex Web GPT DEV chat
+const DEV_HELP = `OpenCode ChatGPT Web DEV chat
 
 Usage:
   codex-chatgpt-web dev launcher
   codex-chatgpt-web dev status [--json]
   codex-chatgpt-web dev setup --browser-only [--automatic-browser-interaction]
-  codex-chatgpt-web dev setup --full --tunnel-id ID --runtime-key-file PATH [--automatic-browser-interaction|--zero-risk-browser-interaction]
+  codex-chatgpt-web dev setup --full --tunnel-id ID --runtime-key-file PATH [--automatic-browser-interaction|--zero-risk-browser-interaction] [--opencode-website-tools]
+  codex-chatgpt-web dev prepare-opencode [--port PORT]
+  codex-chatgpt-web dev serve-opencode [--port PORT]
+  codex-chatgpt-web dev opencode [OpenCode arguments]
   codex-chatgpt-web dev chat NAME [--model MODEL] [MESSAGE]
   codex-chatgpt-web dev list
 
@@ -76,6 +94,14 @@ function takeOption(args: string[], name: string): string | undefined {
   return value;
 }
 
+function openCodeDevPort(value: string | undefined): number {
+  const requested = value ?? "17843";
+  if (!/^[0-9]+$/.test(requested) || Number(requested) < 1 || Number(requested) > 65535) {
+    throw new Error("OpenCode DEV listener --port must be between 1 and 65535");
+  }
+  return Number(requested);
+}
+
 function color(code: number, text: string): string {
   return stdout.isTTY ? `\u001b[${code}m${text}\u001b[0m` : text;
 }
@@ -84,6 +110,21 @@ const bold = (text: string) => color(1, text);
 const dim = (text: string) => color(2, text);
 const cyan = (text: string) => color(36, text);
 const yellow = (text: string) => color(33, text);
+
+/**
+ * The original Codex DEV harness accepts its isolated Codex Native2 DEV
+ * connector. OpenCode uses the same DEV browser and tunnel with a separate
+ * website connector, so its Full Harness profile must pass this same guard.
+ */
+export function assertDevConnectorIdentity(config: Pick<AppConfig, "mode" | "appName" | "websiteMcpContract">): void {
+  if (config.mode !== "full") return;
+  const expected = config.websiteMcpContract === "opencode"
+    ? openCodeWebsiteConnectorName("development")
+    : DEV_CHATGPT_CONNECTOR_NAME;
+  if (config.appName !== expected) {
+    throw new Error("DEV connector identity is outdated. Refresh the DEV profile in the launcher before starting a named chat");
+  }
+}
 
 function compactJson(value: unknown, limit = 2_000): string {
   const encoded = JSON.stringify(value);
@@ -153,13 +194,13 @@ function printHeader(
   mode: "browser-only" | "full",
   biggerContext: boolean,
 ): void {
-  stdout.write(`${bold("Codex Web GPT DEV")} · ${created ? "created" : "continued"} chat ${cyan(state.name)}\n`);
+  stdout.write(`${bold("${PRODUCT_NAME} DEV")} · ${created ? "created" : "continued"} chat ${cyan(state.name)}\n`);
   stdout.write(`model ${state.model} · ${mode === "full" ? "tools explicitly simulated" : "browser-only, no outer tools"} · live launcher browser\n`);
   stdout.write(`context ${statusLine(status)}\n`);
   if (biggerContext) {
     stdout.write(`${yellow("Bigger Context experimental")} · adaptive 1/2/3-message context · same-agent compaction handoff · elevated rate-limit/cooldown risk\n`);
   }
-  stdout.write(`${dim("Codex route is untouched. No Responses port is bound, replaced, stopped, or restarted.")}\n`);
+  stdout.write(`${dim("OpenCode route is untouched. No Responses port is bound, replaced, stopped, or restarted.")}\n`);
 }
 
 async function assertLauncherReady(config: ReturnType<typeof loadConfig>): Promise<void> {
@@ -323,7 +364,15 @@ export async function runDevCommand(args: string[]): Promise<void> {
       }
     }
     const features = readDevChatExperimentalFeatures(paths);
-    const status = { paths, launcher, config, mcpRuntime, features };
+    const openCodeHost = readOpenCodeDevHostStatus(openCodeDevHostPaths(paths.home));
+    const openCode = {
+      ...openCodeHost,
+      listener: {
+        ...(openCodeHost.listenerPort === undefined ? {} : { port: openCodeHost.listenerPort }),
+        running: openCodeHost.listenerPort !== undefined && await openCodeListenerRunning(openCodeHost.listenerPort),
+      },
+    };
+    const status = { paths, launcher, config, mcpRuntime, features, openCode };
     if (json) stdout.write(`${JSON.stringify(status, null, 2)}\n`);
     else {
       stdout.write(`DEV home: ${paths.home}\n`);
@@ -331,7 +380,14 @@ export async function runDevCommand(args: string[]): Promise<void> {
       stdout.write(`config: ${config.configured ? `${config.mode} (${config.purpose})` : `not ready${config.error ? ` · ${config.error}` : ""}`}\n`);
       stdout.write(`MCP runtime: ${mcpRuntime.required ? (mcpRuntime.ready ? "ready" : `not ready${mcpRuntime.detail ? ` · ${mcpRuntime.detail}` : ""}`) : "not required"}\n`);
       stdout.write(`Bigger Context: ${features.biggerContext ? "enabled (experimental, adaptive 1/2/3 messages; same-agent compaction handoff)" : "disabled"}\n`);
-      stdout.write("Codex route: isolated and unused\nResponses listener: not started\n");
+      const openCodeSummary = openCode.configured
+        ? `ready (${openCode.models} model${openCode.models === 1 ? "" : "s"}, plugin ${openCode.pluginInstalled ? "installed" : "missing"})`
+        : `not ready${openCode.error ? ` · ${openCode.error}` : ""}`;
+      const listenerSummary = openCode.listener.port === undefined
+        ? `listener unknown${openCode.error ? ` · ${openCode.error}` : ""}`
+        : `listener 127.0.0.1:${openCode.listener.port} ${openCode.listener.running ? "running" : "not running — start it with dev serve-opencode"}`;
+      stdout.write(`OpenCode host: ${openCodeSummary} · ${listenerSummary}\n`);
+      stdout.write("OpenCode route: isolated and unused\nResponses listener: not started\n");
     }
     return;
   }
@@ -344,6 +400,7 @@ export async function runDevCommand(args: string[]): Promise<void> {
     const runtimeKeyFile = takeOption(args, "--runtime-key-file");
     const descriptorPath = takeOption(args, "--browser-host-descriptor") ?? paths.descriptorPath;
     const connectorNameSuffix = takeOption(args, "--connector-name-suffix");
+    const opencodeWebsiteTools = takeFlag(args, "--opencode-website-tools");
     const acknowledgedUnofficial = takeFlag(args, "--acknowledge-unofficial");
     const refreshAccountCapabilities = takeFlag(args, "--refresh-account-capabilities");
     const automaticBrowserInteraction = takeFlag(args, "--automatic-browser-interaction");
@@ -375,6 +432,7 @@ export async function runDevCommand(args: string[]): Promise<void> {
       mode: full ? "full" : "browser-only",
       browserHostDescriptorPath: descriptorPath,
       ...(connectorNameSuffix !== undefined ? { connectorNameSuffix } : {}),
+      ...(opencodeWebsiteTools ? { websiteMcpContract: "opencode" as const } : {}),
       refreshAccountCapabilities,
       acknowledgedUnofficial,
       ...(automaticBrowserInteraction || manualBrowserInteraction
@@ -390,9 +448,68 @@ export async function runDevCommand(args: string[]): Promise<void> {
     });
     stdout.write(
       `Isolated DEV profile configured (${result.mode}) at ${result.configPath}.\n`
-      + "No Codex route, Responses listener, or system service was installed."
+      + "No OpenCode route, Responses listener, or system service was installed."
       + " In Full mode, the DEV launcher owns the isolated MCP tunnel.\n",
     );
+    return;
+  }
+  if (action === "prepare-opencode") {
+    activateDevProfileEnvironment(paths);
+    const port = openCodeDevPort(takeOption(args, "--port"));
+    if (args.length > 0) throw new Error(`Unknown DEV prepare-opencode arguments: ${args.join(" ")}`);
+    if (!existsSync(paths.configPath)) {
+      throw new Error("Configure the isolated DEV browser profile before preparing OpenCode (dev setup --full --opencode-website-tools)");
+    }
+    const config = loadConfig();
+    assertDevConnectorIdentity(config);
+    const prepared = prepareOpenCodeDevHost(paths.home, config, { port });
+    stdout.write(`Isolated OpenCode DEV provider and identity plugin prepared:\n${prepared.configFile}\n`);
+    stdout.write("The host OpenCode installation, its models, sessions and credentials were not modified.\n");
+    return;
+  }
+  if (action === "opencode") {
+    const hostPaths = openCodeDevHostPaths(paths.home);
+    process.exitCode = await runOpenCodeDevHost(hostPaths, args);
+    return;
+  }
+  if (action === "serve-opencode") {
+    activateDevProfileEnvironment(paths);
+    const requestedPort = openCodeDevPort(takeOption(args, "--port"));
+    if (args.length > 0) throw new Error(`Unknown DEV serve-opencode arguments: ${args.join(" ")}`);
+    const config = { ...loadConfig(), port: requestedPort };
+    assertDevConnectorIdentity(config);
+    // Like the upstream Codex service, reject an invalid listener before its
+    // broker binds; OpenCode also requires matching isolated provider config.
+    assertOpenCodeDevListenerConfig(config, { profileHome: paths.home });
+    const hostPaths = openCodeDevHostPaths(paths.home);
+    if (readOpenCodeDevHostPort(hostPaths) !== requestedPort) {
+      throw new Error("OpenCode DEV provider port differs from listener; rerun with its configured --port");
+    }
+    const key = readOpenCodeDevHostKey(hostPaths);
+    await assertLauncherReady(config);
+    if (config.mode !== "full" || !config.tunnel) {
+      throw new Error("OpenCode DEV listener needs the completed DEV Full Harness tunnel setup");
+    }
+    const tunnel = tunnelStatus(config);
+    if (!tunnel.ok || !tunnel.ready) {
+      throw new Error(`OpenCode DEV tunnel is not ready: ${tunnel.detail}`);
+    }
+    // The DEV launcher owns the tunnel. The host OpenCode listener owns only
+    // its broker, the same way the upstream Codex Responses service does.
+    const broker = TurnBroker.forSocket(config.brokerSocketPath);
+    await broker.listen();
+    try {
+      const server = startServer(config, {
+        openCodeDevListener: { profileHome: paths.home },
+        openCodeTurnVerifier: new OpenCodeTurnVerifier(key),
+        openCodeSessionDeletionKey: key,
+      });
+      stdout.write(`OpenCode DEV Responses listener: http://127.0.0.1:${server.port}/v1/responses\n`);
+      await new Promise<void>(() => {});
+    } catch (error) {
+      await broker.close();
+      throw error;
+    }
     return;
   }
   if (action !== "chat") throw new Error(`Unknown DEV action: ${action}\n\n${DEV_HELP}`);
@@ -410,9 +527,7 @@ export async function runDevCommand(args: string[]): Promise<void> {
     );
   }
   const config = loadConfig();
-  if (config.mode === "full" && config.appName !== DEV_CHATGPT_CONNECTOR_NAME) {
-    throw new Error("DEV connector identity is outdated. Refresh the DEV profile in the launcher before starting a named chat");
-  }
+  assertDevConnectorIdentity(config);
   const runtimeStateRoot = paths.runtimePath;
   const features = readDevChatExperimentalFeatures(paths);
   await assertLauncherReady(config);

@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "../branding";
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -129,19 +130,19 @@ export function installedLauncherCandidates({
   const targetPath = platform === "win32" ? win32 : posix;
   if (platform === "darwin") {
     candidates.push(
-      "/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
-      posix.join(homeDirectory, "Applications", "Codex Web GPT.app", "Contents", "MacOS", "Codex Web GPT"),
+      `/Applications/${PRODUCT_NAME}.app/Contents/MacOS/${PRODUCT_NAME}`,
+      posix.join(homeDirectory, "Applications", `${PRODUCT_NAME}.app`, "Contents", "MacOS", PRODUCT_NAME),
     );
   } else if (platform === "win32") {
     const registeredLocation = windowsInstallLocation?.trim()
       || (process.platform === "win32" && environment === process.env
         ? registeredWindowsLauncherInstallLocation() : undefined);
     if (registeredLocation && win32.isAbsolute(registeredLocation)) {
-      candidates.push(win32.join(registeredLocation, "Codex Web GPT.exe"));
+      candidates.push(win32.join(registeredLocation, `${PRODUCT_NAME}.exe`));
     } else {
       const localAppData = environment.LOCALAPPDATA?.trim();
       if (localAppData) {
-        candidates.push(win32.join(localAppData, "Programs", "Codex Web GPT", "Codex Web GPT.exe"));
+        candidates.push(win32.join(localAppData, "Programs", PRODUCT_NAME, `${PRODUCT_NAME}.exe`));
       }
     }
   } else if (platform === "linux") {
@@ -158,7 +159,7 @@ export function findInstalledLauncherExecutable(options: Parameters<typeof insta
   const executable = candidates.find(executableFile);
   if (executable) return executable;
   throw new Error(
-    "Installed Codex Web GPT launcher was not found. Install it first or set CODEX_WEB_GPT_LAUNCHER_EXECUTABLE to its absolute executable path."
+    `Installed ${PRODUCT_NAME} launcher was not found. Install it first or set CODEX_WEB_GPT_LAUNCHER_EXECUTABLE to its absolute executable path.`
       + ` Checked: ${candidates.join(", ") || "no platform candidates"}`,
   );
 }

@@ -69,6 +69,8 @@ const config = {
   host: "127.0.0.1",
   port,
   contextWindow: 256_000,
+  // Historical legacy connector name (see LEGACY_CHATGPT_CONNECTOR_NAMES): it
+  // is the one connector name validation still accepts from older configs.
   appName: "Codex Native",
   browserHost: "managed-chrome",
   chromeExecutablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -107,11 +109,11 @@ try {
   const unauthenticatedModelsBody = await unauthenticatedModels.json() as { error?: { message?: string } };
   if (unauthenticatedModels.status !== 502
     || !unauthenticatedModelsBody.error?.message?.includes("incoming Bearer authorization")) {
-    throw new Error(`native model passthrough did not fail closed without Codex auth: ${JSON.stringify(unauthenticatedModelsBody)}`);
+    throw new Error(`native model passthrough did not fail closed without OpenCode auth: ${JSON.stringify(unauthenticatedModelsBody)}`);
   }
   const websocketNegotiation = await fetch(`http://127.0.0.1:${port}/v1/responses`);
   if (websocketNegotiation.status !== 426) {
-    throw new Error(`Responses WebSocket negotiation did not select Codex HTTP/SSE fallback: HTTP ${websocketNegotiation.status}`);
+    throw new Error(`Responses WebSocket negotiation did not select OpenCode HTTP/SSE fallback: HTTP ${websocketNegotiation.status}`);
   }
   const invalid = await fetch(`http://127.0.0.1:${port}/v1/responses`, {
     method: "POST",

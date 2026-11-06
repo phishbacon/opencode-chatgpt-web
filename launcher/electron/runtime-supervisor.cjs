@@ -11,6 +11,7 @@ const {
   terminateOwnedProcessTree,
 } = require("./process-tree.cjs");
 const { runtimeInvocation } = require("./runtime-command.cjs");
+const { openCodeConnectorName } = require("./connector-identity.cjs");
 const { windowsTrustEnvironment } = require("./windows-trust.cjs");
 const { tunnelConnectionEnvironment } = require("./tunnel-proxy.cjs");
 
@@ -207,6 +208,17 @@ function validateConfig(config, descriptorPath, platform = process.platform, lau
   }
   if (config.browserInteractionMode !== "automatic" && config.browserInteractionMode !== "manual") {
     throw new Error("Runtime configuration has an invalid browser interaction mode");
+  }
+  if (config.websiteMcpContract !== undefined && config.websiteMcpContract !== "opencode") {
+    throw new Error("Runtime configuration has an invalid website MCP contract");
+  }
+  if (config.websiteMcpContract === "opencode") {
+    const openCodeConnector = openCodeConnectorName(launcherProfile);
+    if (config.mode !== "full" || config.browserInteractionMode !== "automatic"
+      || config.appName !== openCodeConnector
+      || config.automaticAppName !== openCodeConnector) {
+      throw new Error(`OpenCode website tools require full automatic mode and the ${openCodeConnector} connector`);
+    }
   }
   if (config.subagentProtocol !== undefined
     && config.subagentProtocol !== "compatibility-v1"
@@ -1077,7 +1089,9 @@ class RuntimeSupervisor {
 
   async runTunnelConnectCommand(config) {
     const connection = await tunnelConnectionEnvironment({ resolveProxy: this.resolveProxy });
-    const contract = config.browserInteractionMode === "manual" ? "safe" : "native";
+    const contract = config.websiteMcpContract === "opencode"
+      ? "opencode"
+      : config.browserInteractionMode === "manual" ? "safe" : "native";
     const invocation = this.runtimeCommand([
       "mcp",
       "--contract",

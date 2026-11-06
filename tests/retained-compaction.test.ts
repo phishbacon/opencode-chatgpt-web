@@ -161,19 +161,19 @@ test("retained compaction provides one exact same-agent control binding", () => 
   const prompt = structuredCompactionHandoffInstruction({
     token: "turn_11111111111111111111111111111111",
     handoffId: "handoff_22222222222222222222222222222222",
-  }, "Codex app");
-  expect(prompt).toContain('selected ChatGPT plugin "Codex app"');
+  }, "OpenCode app");
+  expect(prompt).toContain('selected ChatGPT plugin "OpenCode app"');
   expect(prompt).not.toContain("Codex Native");
-  expect(prompt).toContain("Automatic Codex context compaction has started.");
+  expect(prompt).toContain("Automatic OpenCode context compaction has started.");
   expect(prompt).toContain("Stop ordinary task work");
   expect(prompt).toContain("turn_token turn_11111111111111111111111111111111");
   expect(prompt).toContain("wire_name codex.control.compaction_handoff");
   expect(prompt).toContain('"handoff_id":"handoff_22222222222222222222222222222222"');
-  expect(prompt).toContain("do not use it with codex_exec, codex_tool_inventory, or any outer Codex tool");
+  expect(prompt).toContain("do not use it with codex_exec, codex_tool_inventory, or any outer OpenCode tool");
   expect(prompt).toContain("submitted=true");
 });
 
-test("a compaction control token cannot claim the ordinary Codex tool environment", async () => {
+test("a compaction control token cannot claim the ordinary OpenCode tool environment", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-compaction-capability-"));
   const broker = TurnBroker.forSocket(defaultBrokerEndpoint(root));
   try {
@@ -225,7 +225,7 @@ test("retained compaction submits through the published MCP contract with no ord
       } finally { prepared.release(); }
     };
     const summary = await requestRetainedCompactionHandoff(
-      { appName: "Codex app", run } as never, request(true), source, broker,
+      { appName: "OpenCode app", run } as never, request(true), source, broker,
       { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
       "trace_mcp_handoff",
     );
@@ -320,7 +320,7 @@ test("active compaction delivers the current result and converts every later MCP
   }
 });
 
-test("active compaction drains an MCP call already queued without an outer Codex waiter", async () => {
+test("active compaction drains an MCP call already queued without an outer OpenCode waiter", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-queued-before-compaction-"));
   const broker = TurnBroker.forSocket(defaultBrokerEndpoint(root));
   try {
@@ -395,11 +395,11 @@ test.each(["5.6", "6"] as const)("a retained %s checkpoint preserves model selec
     abortCompactionTransaction: () => { transactionAborted = true; },
   } as unknown as TurnBroker;
   const worker = {
-    appName: "Codex app",
+    appName: "OpenCode app",
     run: async (turn: BrowserTurn): Promise<string> => {
       captured = turn;
       const prepared = await turn.prepareResume!();
-      expect(prepared.text).toContain('selected ChatGPT plugin "Codex app"');
+      expect(prepared.text).toContain('selected ChatGPT plugin "OpenCode app"');
       expect(prepared.text).toContain("wire_name codex.control.compaction_handoff");
       prepared.release();
       return await new Promise<string>((_resolve, reject) => {
@@ -456,7 +456,7 @@ test("completed retained compaction never treats ordinary assistant text as a ha
     abortCompactionTransaction() {},
   } as unknown as TurnBroker;
   const worker = {
-    appName: "Codex app",
+    appName: "OpenCode app",
     run: async () => '{"checkpoint":"must never be parsed"}',
   };
 
@@ -483,7 +483,7 @@ test("a settled browser response without a checkpoint reports the missing handof
   const guard = setTimeout(() => abort.abort(new Error("test observation guard")), 1000);
   try {
     await expect(requestRetainedCompactionHandoff(
-      { appName: "Codex app", run: async () => "The requested tool call did not run." } as never,
+      { appName: "OpenCode app", run: async () => "The requested tool call did not run." } as never,
       request(true), source, broker,
       { localToolsEnabled: true, solAvailable: true, extraHighAvailable: true, proAvailable: true },
       "trace_missing_handoff", abort.signal,
@@ -506,7 +506,7 @@ test("a checkpoint submitted before browser completion wins the terminal respons
   });
   try {
     await expect(requestRetainedCompactionHandoff(
-      { appName: "Codex app", run: async (turn: BrowserTurn) => {
+      { appName: "OpenCode app", run: async (turn: BrowserTurn) => {
         const prepared = await turn.prepare();
         const token = prepared.text.match(/turn_token (turn_\w+)/)![1]!;
         const handoffId = prepared.text.match(/handoff_id (handoff_\w+)/)![1]!;
@@ -546,7 +546,7 @@ test("retained compaction deadline bounds browser settlement after the control h
     abortCompactionTransaction: () => { transactionAborted = true; },
   } as unknown as TurnBroker;
   const worker = {
-    appName: "Codex app",
+    appName: "OpenCode app",
     run: async () => new Promise<string>(() => {}),
   };
 
@@ -672,7 +672,7 @@ test("native interruption before registration prevents the detached compaction f
     nativeThreadId: `thread-${key}`,
     nativeTurnId: `turn-${key}`,
   };
-  const reason = new DOMException("Codex turn interrupted", "AbortError");
+  const reason = new DOMException("OpenCode turn interrupted", "AbortError");
 
   const cancellation = cancelStructuredCompactionNativeTurn(
     owner.nativeThreadId,
@@ -739,7 +739,7 @@ test("a completed exact compaction remains replayable after a later native inter
   const cancellation = cancelStructuredCompactionNativeTurn(
     owner.nativeThreadId,
     owner.nativeTurnId,
-    new DOMException("Codex turn interrupted", "AbortError"),
+    new DOMException("OpenCode turn interrupted", "AbortError"),
   );
   expect(cancellation.cancelled).toBe(0);
   await cancellation.settlement;
@@ -767,7 +767,7 @@ test("a duplicate native interruption refreshes its lifetime without replacing i
       nativeThreadId: `thread-${key}`,
       nativeTurnId: `turn-${key}`,
     };
-    const originalReason = new DOMException("first Codex turn interruption", "AbortError");
+    const originalReason = new DOMException("first OpenCode turn interruption", "AbortError");
     cancelStructuredCompactionNativeTurn(owner.nativeThreadId, owner.nativeTurnId, originalReason);
 
     now = initialNow + (29 * 60_000) + 59_000;
@@ -791,7 +791,7 @@ test("a duplicate native interruption refreshes its lifetime without replacing i
 });
 
 test("structured compaction rejects incomplete native interruption identities", () => {
-  const reason = new DOMException("Codex turn interrupted", "AbortError");
+  const reason = new DOMException("OpenCode turn interrupted", "AbortError");
   expect(() => cancelStructuredCompactionNativeTurn(" ", "turn_valid", reason))
     .toThrow("non-empty native thread and turn ids");
   expect(() => runStructuredCompactionOnce(
@@ -981,11 +981,11 @@ test("Zero Risk active compaction returns through its explicit completion contro
 
   await expect(settleActiveZeroRiskCompactionSource(parsed, source, broker))
     .resolves.toBe("Zero Risk checkpoint");
-  expect(JSON.stringify(completed)).toContain("Return only the complete checkpoint summary to Codex with codex_turn_complete");
+  expect(JSON.stringify(completed)).toContain("Return only the complete checkpoint summary to OpenCode with codex_turn_complete");
   expect(JSON.stringify(completed)).not.toContain("CODEX_ACTIVE_COMPACTION_CHECKPOINT_");
 });
 
-test("active compaction interrupts a queued MCP call that Codex never started waiting for", async () => {
+test("active compaction interrupts a queued MCP call that OpenCode never started waiting for", async () => {
   const root = mkdtempSync(join(shortSocketTempRoot(), "cgw-compaction-queued-call-"));
   const broker = TurnBroker.forSocket(defaultBrokerEndpoint(root));
   try {
@@ -1219,7 +1219,7 @@ test("adapter compact returns one same-agent handoff and preserves a pre-existin
       browserHost: "launcher",
       browserHostDescriptorPath: join(root, "launcher.json"),
       brokerSocketPath: defaultBrokerEndpoint(root),
-      appName: "Codex Native DEV",
+      appName: "OpenCode Native DEV",
       localToolsEnabled: true,
       solAvailable: true,
       extraHighAvailable: true, proAvailable: true,
@@ -1314,7 +1314,7 @@ test("a compact HTTP observer can reconnect without sending a second retained-ch
       browserHost: "launcher",
       browserHostDescriptorPath: join(root, "launcher.json"),
       brokerSocketPath: defaultBrokerEndpoint(root),
-      appName: "Codex Native DEV",
+      appName: "OpenCode Native DEV",
       localToolsEnabled: true,
       solAvailable: true,
       extraHighAvailable: true, proAvailable: true,
@@ -1436,7 +1436,7 @@ test.each([false, true])("structured compact rebuilds canonical context when its
       expect(lastRecord.message.content).toBe(compact.context.messages.at(-1)!.content);
     }
     prepared.release();
-    return "Fallback checkpoint from canonical Codex context";
+    return "Fallback checkpoint from canonical OpenCode context";
   };
   const compact = request(true);
   const events: AdapterEvent[] = [];
@@ -1449,7 +1449,7 @@ test.each([false, true])("structured compact rebuilds canonical context when its
     );
     expect(browserStarts).toBe(1);
     expect(events.some(event => event.type === "text_delta"
-      && event.text.includes("Fallback checkpoint from canonical Codex context"))).toBeTrue();
+      && event.text.includes("Fallback checkpoint from canonical OpenCode context"))).toBeTrue();
     expect(events.some(event => event.type === "text_delta"
       && event.text.includes("CODEX_LATEST_USER_PROMPT_JSON"))).toBeTrue();
     expect(events.at(-1)).toMatchObject({ type: "done", stopReason: "stop", endTurn: true });

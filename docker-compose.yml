@@ -1,0 +1,36 @@
+# Browser container for the OpenCode ChatGPT Web harness (Phase 9).
+#
+# Bundles the browser side only: Electron, browser helper, Responses daemon,
+# turn broker, tunnel-client and website MCP. OpenCode, the workspace and all
+# tool execution stay on the host. Machine-local values (tunnel id, publish
+# interfaces) live in .env — see .env.example — which is git-ignored.
+services:
+  browser:
+    build: .
+    image: codex-chatgpt-web-browser:phase9
+    container_name: codex-browser-phase9
+    restart: unless-stopped
+    environment:
+      TUNNEL_ID: ${TUNNEL_ID:?set TUNNEL_ID in .env}
+      # Plain-text noVNC password; rendered into VNC passwd format at startup.
+      # Leave empty to fall back to the mounted host VNC password file.
+      VNC_PASSWORD: ${VNC_PASSWORD:-}
+    ports:
+      # Signed Responses bridge — host loopback only (the plan's trust boundary).
+      - "127.0.0.1:17844:17842"
+      # noVNC view for ChatGPT login / maintenance (VNC-password authenticated).
+      - "${NOVNC_BIND_LAN:?set NOVNC_BIND_LAN in .env}:18086:6080"
+      - "${NOVNC_BIND_TS:?set NOVNC_BIND_TS in .env}:18086:6080"
+    volumes:
+      # Config, tunnel profiles and browser/login state (survives recreation).
+      - codex-browser-home:/home/bun/.codex-chatgpt-web
+      # Read-only secrets; never copied into the image.
+      - ${HOME}/.codex-chatgpt-web-dev/opencode-host/turn-signing.key:/run/secrets/turn-signing.key:ro
+      - ${HOME}/.codex-chatgpt-web-dev/secrets/tunnel-runtime-automatic.key:/run/secrets/tunnel-runtime.key:ro
+      - ${HOME}/.config/tigervnc/passwd:/run/secrets/vnc.passwd:ro
+
+volumes:
+  # Fixed name so the existing volume (config, tunnel profiles, ChatGPT
+  # login) is adopted rather than a project-prefixed replacement.
+  codex-browser-home:
+    name: codex-browser-home

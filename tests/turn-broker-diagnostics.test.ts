@@ -105,7 +105,7 @@ test("expiry preserves the original retirement diagnostics for late timeout clea
     expect(await queued.outcome).toBe("rejected");
     await expect(callTurnBroker(f.socketPath, {
       method: "release", bindingId: f.bindingId, failure: { ...failure, timeoutMs: -1 },
-    })).rejects.toThrow("Invalid Codex tool retirement failure");
+    })).rejects.toThrow("Invalid OpenCode tool retirement failure");
     await expect(callTurnBroker(f.socketPath, { method: "claim", token: f.token })).rejects.toThrow("already finished");
   } finally { timer.mockRestore(); clock.mockRestore(); await f.close(); }
 });

@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "../branding";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ProviderAdapter } from "../adapters/base";
@@ -81,15 +82,15 @@ interface DevToolCall {
 }
 
 export const DEV_CHAT_SYSTEM_INSTRUCTIONS = [
-  "You are running inside the Codex Web GPT DEV outer-harness simulator.",
-  "Behave like the normal Codex model backend and use the available Codex Native tools whenever they help answer the user's request.",
+  `You are running inside the ${PRODUCT_NAME} DEV outer-harness simulator.`,
+  "Behave like the normal OpenCode model backend and use the available OpenCode Native tools whenever they help answer the user's request.",
   "Every outer tool result is an explicit simulation receipt. No command, file edit, image read, user prompt, or external side effect actually occurs.",
   "Never describe a simulated receipt as a real-world effect. Continue reasoning from the receipt exactly as test evidence for the transport flow.",
 ].join(" ");
 
 export const DEV_CHAT_BROWSER_ONLY_INSTRUCTIONS = [
-  "You are running inside the Codex Web GPT DEV outer-harness simulator.",
-  "Behave like the normal Codex model backend.",
+  `You are running inside the ${PRODUCT_NAME} DEV outer-harness simulator.`,
+  "Behave like the normal OpenCode model backend.",
   "This browser-only DEV profile exposes no outer tools. Do not claim that commands, file edits, UI actions, or external side effects occurred.",
 ].join(" ");
 

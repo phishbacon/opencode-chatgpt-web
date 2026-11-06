@@ -109,7 +109,7 @@ test("retiring current-turn MCP progress atomically clears calls and rejects its
 });
 
 const tools: CodexTool[] = [
-  { name: "exec", description: "Run nested Codex tools", parameters: {}, freeform: true },
+  { name: "exec", description: "Run nested OpenCode tools", parameters: {}, freeform: true },
   { name: "exec_command", description: "Run command", parameters: { type: "object" } },
   { name: "write_stdin", description: "Continue command", parameters: { type: "object" } },
   { name: "apply_patch", description: "Patch files", parameters: {}, freeform: true },
@@ -284,7 +284,7 @@ function canonicalJson(value: unknown): string {
 }
 
 describe("ChatGPT outer-native harness v4", () => {
-  test("extracts authoritative environment, tool registry, and turn identity from the Codex wire envelope", () => {
+  test("extracts authoritative environment, tool registry, and turn identity from the OpenCode wire envelope", () => {
     const request = rawWireRequest(environmentXml);
     expect(extractChatGptTurnEnvironment(request)).toEqual({
       cwd: tempRoot,
@@ -300,13 +300,13 @@ describe("ChatGPT outer-native harness v4", () => {
     });
   });
 
-  test("accepts adjacent native turn provenance when Codex omits top-level client_metadata", () => {
+  test("accepts adjacent native turn provenance when OpenCode omits top-level client_metadata", () => {
     const request = rawWireRequest(environmentXml);
     delete (request._rawBody as { client_metadata?: unknown }).client_metadata;
     expect(extractChatGptTurnEnvironment(request).cwd).toBe(tempRoot);
   });
 
-  test("accepts the canonical current-turn environment when Codex omits item turn ids and git metadata", () => {
+  test("accepts the canonical current-turn environment when OpenCode omits item turn ids and git metadata", () => {
     const request = canonicalCurrentWireRequest(environmentXml);
 
     expect(extractChatGptTurnEnvironment(request)).toEqual({
@@ -325,7 +325,7 @@ describe("ChatGPT outer-native harness v4", () => {
     raw.input[2]!.internal_chat_message_metadata_passthrough = { turn_id: "turn_other" };
 
     expect(() => extractChatGptTurnEnvironment(request)).toThrow("missing cwd");
-    expect(() => chatGptTurnExecutionKey(request)).toThrow("conflicts with native Codex turn_id");
+    expect(() => chatGptTurnExecutionKey(request)).toThrow("conflicts with native OpenCode turn_id");
   });
 
   test("starts a tool-capable browser turn across a same-turn developer gap", async () => {
@@ -354,7 +354,7 @@ describe("ChatGPT outer-native harness v4", () => {
       raw.input.splice(2, 0, {
         type: "message",
         role: "developer",
-        content: [{ type: "input_text", text: "Current Codex Desktop developer context." }],
+        content: [{ type: "input_text", text: "Current OpenCode Desktop developer context." }],
         internal_chat_message_metadata_passthrough: { turn_id: "turn_test_123" },
       });
 
@@ -438,7 +438,7 @@ describe("ChatGPT outer-native harness v4", () => {
       adapter: "chatgpt-web",
       baseUrl: `browser://chatgpt-retained-messages-${Date.now()}`,
       chatgptWeb: {
-        appName: "Codex app",
+        appName: "OpenCode app",
         browserHost: "launcher",
         browserHostDescriptorPath: join(tempRoot, "retained-launcher.json"),
         experimentalFreshConversationPerTurn: freshConversation,
@@ -462,7 +462,7 @@ describe("ChatGPT outer-native harness v4", () => {
       }
       expect(turn.captureLunaCheckpoint).toBeUndefined();
       const prepared = browserMessages === 0 || freshConversation ? await turn.prepare() : await turn.prepareResume!();
-      expect(prepared.text).toContain('The selected local Codex plugin for this turn is "Codex app".');
+      expect(prepared.text).toContain('The selected local OpenCode plugin for this turn is "OpenCode app".');
       preparedPrompts.push(prepared.text);
       conversationKeys.push(turn.conversationKey!);
       const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
@@ -635,7 +635,7 @@ describe("ChatGPT outer-native harness v4", () => {
     });
   });
 
-  test("recovers the trusted environment from a native full-history Codex resume", () => {
+  test("recovers the trusted environment from a native full-history OpenCode resume", () => {
     const first = rawWireRequest(environmentXml);
     const firstInput = (first._rawBody as { input: unknown[] }).input;
     const request = parsed();
@@ -675,7 +675,7 @@ describe("ChatGPT outer-native harness v4", () => {
     firstInput.splice(1, 0, {
       type: "message",
       role: "developer",
-      content: [{ type: "input_text", text: "Historical Codex developer context" }],
+      content: [{ type: "input_text", text: "Historical OpenCode developer context" }],
       internal_chat_message_metadata_passthrough: { turn_id: "turn_test_123" },
     });
 
@@ -720,7 +720,7 @@ describe("ChatGPT outer-native harness v4", () => {
     firstInput.splice(1, 0, {
       type: "message",
       role: "developer",
-      content: [{ type: "input_text", text: "Historical Codex developer context" }],
+      content: [{ type: "input_text", text: "Historical OpenCode developer context" }],
       internal_chat_message_metadata_passthrough: { turn_id: "turn_test_123" },
     });
     const request = parsed();
@@ -758,7 +758,7 @@ describe("ChatGPT outer-native harness v4", () => {
       firstInput.splice(1, 0, {
         type: "message",
         role: "developer",
-        content: [{ type: "input_text", text: "Historical Codex developer context" }],
+        content: [{ type: "input_text", text: "Historical OpenCode developer context" }],
         internal_chat_message_metadata_passthrough: { turn_id: "turn_test_123" },
       });
       const request = parsed();
@@ -833,7 +833,7 @@ describe("ChatGPT outer-native harness v4", () => {
   });
 
 
-  test("uses stable native turn metadata for every provider round in one Codex turn", () => {
+  test("uses stable native turn metadata for every provider round in one OpenCode turn", () => {
     const first = rawWireRequest(environmentXml);
     const second = rawWireRequest(environmentXml);
     second.context.messages[0]!.timestamp = Date.now();
@@ -909,7 +909,7 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(chatGptTurnExecutionKey(laterCompact)).not.toBe(chatGptTurnExecutionKey(newCompactTurn));
     expect(chatGptCompactionSourceExecutionKey(laterCompact)).toBe(chatGptTurnExecutionKey(first));
     expect(chatGptThreadOwnershipKey(laterCompact)).toBe(chatGptThreadOwnershipKey(first));
-    expect(() => chatGptTurnExecutionKey(parsed(environmentXml))).toThrow("requires native Codex turn_id metadata");
+    expect(() => chatGptTurnExecutionKey(parsed(environmentXml))).toThrow("requires native OpenCode turn_id metadata");
   });
 
   test("coalesces provider retries onto one browser runtime and preserves outstanding calls", () => {
@@ -1039,7 +1039,7 @@ describe("ChatGPT outer-native harness v4", () => {
     sessions.clear();
   });
 
-  test("retires only the exact active native turn that Codex marked aborted", () => {
+  test("retires only the exact active native turn that OpenCode marked aborted", () => {
     const sessions = new ChatGptTurnSessions();
     const cancelled: string[] = [];
     const runtime = (name: string) => ({
@@ -1760,7 +1760,7 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(files[0]?.buffer.length).toBeGreaterThan(0);
   });
 
-  test("keeps only the newest complete Codex model-switch contract", () => {
+  test("keeps only the newest complete OpenCode model-switch contract", () => {
     const history = [
       { role: "developer" as const, content: "<model_switch>old contract</model_switch>", timestamp: 1 },
       { role: "developer" as const, content: "<skills_instructions>old catalog</skills_instructions>", timestamp: 2 },
@@ -1846,7 +1846,7 @@ describe("ChatGPT outer-native harness v4", () => {
 
     const compiled = compileChatGptWebPrompt(request, browserOnlyCapabilities);
     expect(compiled.turnToken).toBeUndefined();
-    expect(compiled.text).toContain("ChatGPT Web Pro with no local Codex bridge");
+    expect(compiled.text).toContain("ChatGPT Web Pro with no local OpenCode bridge");
     expect(compiled.text).toContain("web search, browsing, research");
     expect(compiled.text).toContain("prepared workspace evidence");
     expect(compiled.text).toContain('"system":["system-rule","repo-rule"]');
@@ -1854,7 +1854,7 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(compiled.images).toHaveLength(1);
     expect(compiled.text).not.toContain("codex_bind_turn");
     expect(compiled.text).not.toContain("turn_token");
-    expect(compiled.text).not.toContain("Use the attached Codex Native plugin");
+    expect(compiled.text).not.toContain("Use the attached OpenCode Native plugin");
     expect(() => compileChatGptWebPrompt(request, browserOnlyCapabilities, "turn_forbidden")).toThrow("must not receive");
 
     expect(chatGptReadOnlyContextWarning(request, browserOnlyCapabilities)).toContain("complete accumulated task context");
@@ -2339,7 +2339,7 @@ describe("ChatGPT outer-native harness v4", () => {
     expect(markdown).toContain("[Open repository](https://github.com/example/repo)");
   });
 
-  test("replays the complete outer Codex context, including prior reasoning and tool evidence", () => {
+  test("replays the complete outer OpenCode context, including prior reasoning and tool evidence", () => {
     const request = parsed();
     request.context.systemPrompt = ["system-rule", "repo-rule"];
     request.context.messages = [
@@ -2387,7 +2387,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }])).toThrow("inline base64 data URL");
   });
 
-  test("holds an MCP invocation until the outer Codex result arrives", async () => {
+  test("holds an MCP invocation until the outer OpenCode result arrives", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h3-${process.pid}-${Date.now()}`);
     const broker = TurnBroker.forSocket(socketPath);
     const environment = extractChatGptTurnEnvironment(parsed(environmentXml));
@@ -2703,7 +2703,7 @@ describe("ChatGPT outer-native harness v4", () => {
       adapter: "chatgpt-web",
       baseUrl: `browser://chatgpt-active-compact-${Date.now()}`,
       chatgptWeb: {
-        appName: "Codex app",
+        appName: "OpenCode app",
         browserHost: "launcher",
         browserHostDescriptorPath: join(tempRoot, "active-compact-launcher.json"),
         brokerSocketPath: socketPath,
@@ -2727,7 +2727,7 @@ describe("ChatGPT outer-native harness v4", () => {
         retainedCompactionMessages += 1;
         const prepared = await turn.prepareResume!();
         try {
-          expect(prepared.text).toContain('selected ChatGPT plugin "Codex app"');
+          expect(prepared.text).toContain('selected ChatGPT plugin "OpenCode app"');
           const controlToken = prepared.text.match(/turn_token (turn_[a-f0-9]{32})/)?.[1];
           const handoffId = prepared.text.match(/handoff_id (handoff_[a-f0-9]{32})/)?.[1];
           if (!controlToken || !handoffId) throw new Error("structured compaction binding missing");
@@ -2750,7 +2750,7 @@ describe("ChatGPT outer-native harness v4", () => {
         const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
         if (prepared.text.includes("The project was inspected and the pending command completed.")) {
           continuationTurnToken = token;
-          turn.onReasoningSummary?.("Resumed from the compacted Codex history");
+          turn.onReasoningSummary?.("Resumed from the compacted OpenCode history");
           const nativeResult = await invokeAfterBrowserBoundary(turn, () => callTurnBroker<BrokerToolResult>(socketPath, {
             method: "invoke",
             bindingId: claimed.bindingId,
@@ -2924,7 +2924,7 @@ describe("ChatGPT outer-native harness v4", () => {
       const prepared = await turn.prepare();
       try {
         expect(prepared.text).toContain("For local work required by the task, use the selected plugin's tools directly");
-        expect(prepared.text).not.toContain("with no local Codex bridge");
+        expect(prepared.text).not.toContain("with no local OpenCode bridge");
         const token = prepared.text.match(/turn_token (turn_[A-Za-z0-9_-]+)/)?.[1];
         if (!token) throw new Error("turn token missing from compiled Pro prompt");
         const claimed = await callTurnBroker<{ bindingId: string }>(socketPath, { method: "claim", token });
@@ -2961,7 +2961,7 @@ describe("ChatGPT outer-native harness v4", () => {
       );
       expect(call?.name).toBe("exec_command");
       expect(firstEvents.some(event => event.type === "text_delta"
-        && event.text.includes("cannot access the local Codex computer"))).toBe(false);
+        && event.text.includes("cannot access the local OpenCode computer"))).toBe(false);
       expect(firstEvents.at(-1)).toMatchObject({ type: "done", stopReason: "tool_use", endTurn: false });
 
       const continuation = structuredClone(request);
@@ -3034,7 +3034,7 @@ describe("ChatGPT outer-native harness v4", () => {
     ];
     const gatewayOnlyEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
     gatewayOnlyEnvironment.tools = [
-      { name: "exec", description: "Run nested Codex tools, including exec_command", parameters: {}, freeform: true },
+      { name: "exec", description: "Run nested OpenCode tools, including exec_command", parameters: {}, freeform: true },
       {
         name: "tool_search", description: "Load deferred tools", toolSearch: true,
         parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
@@ -3097,7 +3097,7 @@ describe("ChatGPT outer-native harness v4", () => {
       // The command polling limit changed from 300s to 60s. Troubleshooting documents
       // reloading the connector schema; stale long polls fail without retiring the task.
       expect(createHash("sha256").update(canonicalJson(publicConnectorAbi)).digest("hex"))
-        .toBe("721bae5c7531356de5a399707247012210d47747eb24c8a7cbca528df1e265fc");
+        .toBe("8592af07e0274170e04fa3c5b2929eafc23bd4705a7daef2e78eb495bc5e8b79");
       expect(listed.tools.find(tool => tool.name === "codex_tool_call")?.description)
         .toContain("reserved codex.control.compaction_handoff operation, which is not listed by inventory");
       for (const tool of listed.tools) {
@@ -3286,7 +3286,7 @@ describe("ChatGPT outer-native harness v4", () => {
       await search;
 
       const rawGatewayInventory = await inventoryThroughGateway(
-        "Run nested Codex tools",
+        "Run nested OpenCode tools",
         false,
         ["exec", "web__run", "mcp__codex_apps__codex_native2_codex_exec"],
       );
@@ -3305,7 +3305,7 @@ describe("ChatGPT outer-native harness v4", () => {
       const rawWeb = call("codex_tool_call", {
         turn_token: token,
         wire_name: "exec",
-        input: "const value = await tools.web__run({ search_query: [{ q: 'Codex' }] }); text(value);",
+        input: "const value = await tools.web__run({ search_query: [{ q: 'OpenCode' }] }); text(value);",
       });
       const [rawWebRequest] = await broker.nextToolBatch(token);
       const rawWebCalls: GatewayProgramCall[] = [];
@@ -3317,7 +3317,7 @@ describe("ChatGPT outer-native harness v4", () => {
       );
       expect(rawWebCalls).toEqual([{
         name: "web__run",
-        input: { search_query: [{ q: "Codex" }] },
+        input: { search_query: [{ q: "OpenCode" }] },
       }]);
       broker.completeTool(token, rawWebRequest!.callId, { content: rawWebContent });
       expect((await rawWeb).content).toEqual([{
@@ -3391,7 +3391,7 @@ describe("ChatGPT outer-native harness v4", () => {
       const nestedWeb = call("codex_tool_call", {
         turn_token: token,
         wire_name: "web__run",
-        arguments: { search_query: [{ q: "Codex" }] },
+        arguments: { search_query: [{ q: "OpenCode" }] },
       });
       const [nestedWebRequest] = await broker.nextToolBatch(token);
       expect(nestedWebRequest).toMatchObject({ wireName: "exec", freeform: true });
@@ -3403,7 +3403,7 @@ describe("ChatGPT outer-native harness v4", () => {
       );
       expect(nestedWebCalls).toEqual([{
         name: "web__run",
-        input: { search_query: [{ q: "Codex" }] },
+        input: { search_query: [{ q: "OpenCode" }] },
       }]);
       broker.completeTool(token, nestedWebRequest!.callId, { content: nestedWebContent });
       expect((await nestedWeb).content).toEqual([{
@@ -3626,7 +3626,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   }, 15_000);
 
-  test("routes every dedicated direct-token bridge to its exact top-level Codex tool", async () => {
+  test("routes every dedicated direct-token bridge to its exact top-level OpenCode tool", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h4-mcp-direct-${process.pid}-${Date.now()}`);
     const broker = TurnBroker.forSocket(socketPath);
     const directEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
@@ -3660,7 +3660,7 @@ describe("ChatGPT outer-native harness v4", () => {
       });
       expect(JSON.stringify(inventory)).not.toContain("binding_");
       // A fully local inventory lookup still crosses the broker's activity fence even though it
-      // does not enqueue an outer Codex tool call.
+      // does not enqueue an outer OpenCode tool call.
       expect(broker.beginCompletionFence(token)).toBe(2);
 
       const exec = call("codex_exec", {
@@ -3736,7 +3736,7 @@ describe("ChatGPT outer-native harness v4", () => {
     }
   }, 30_000);
 
-  test("keeps simultaneous direct-token MCP actions isolated by outer Codex turn", async () => {
+  test("keeps simultaneous direct-token MCP actions isolated by outer OpenCode turn", async () => {
     const socketPath = brokerTestEndpoint(`cgw-h4-mcp-isolation-${process.pid}-${Date.now()}`);
     const broker = TurnBroker.forSocket(socketPath);
     const firstEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
@@ -3744,14 +3744,14 @@ describe("ChatGPT outer-native harness v4", () => {
     firstEnvironment.roots = [firstEnvironment.cwd];
     firstEnvironment.writableRoots = [firstEnvironment.cwd];
     firstEnvironment.tools = [
-      { name: "exec_command", description: "Run a Codex command", parameters: { type: "object" } },
+      { name: "exec_command", description: "Run a OpenCode command", parameters: { type: "object" } },
     ];
     const secondEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
     secondEnvironment.cwd = "/workspace/second";
     secondEnvironment.roots = [secondEnvironment.cwd];
     secondEnvironment.writableRoots = [secondEnvironment.cwd];
     secondEnvironment.tools = [
-      { name: "shell_command", description: "Run a legacy Codex command", parameters: { type: "object" } },
+      { name: "shell_command", description: "Run a legacy OpenCode command", parameters: { type: "object" } },
     ];
     const firstToken = await broker.register(firstEnvironment, 60_000, "first-turn");
     const secondToken = await broker.register(secondEnvironment, 60_000, "second-turn");
@@ -3808,7 +3808,7 @@ describe("ChatGPT outer-native harness v4", () => {
     const broker = TurnBroker.forSocket(socketPath);
     const gatewayOnlyEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
     gatewayOnlyEnvironment.tools = [
-      { name: "exec", description: "Run nested Codex tools, including exec_command", parameters: {}, freeform: true },
+      { name: "exec", description: "Run nested OpenCode tools, including exec_command", parameters: {}, freeform: true },
       { name: "wait", description: "Wait for an exec cell", parameters: { type: "object" } },
       { name: "request_user_input", description: "Request user input", parameters: { type: "object" } },
     ];
@@ -3866,7 +3866,7 @@ describe("ChatGPT outer-native harness v4", () => {
     const broker = TurnBroker.forSocket(socketPath);
     const environment = extractChatGptTurnEnvironment(parsed(environmentXml));
     environment.tools = [
-      { name: "exec_command", description: "Run a Codex command", parameters: { type: "object" } },
+      { name: "exec_command", description: "Run a OpenCode command", parameters: { type: "object" } },
     ];
     const abandonedToken = await broker.register(environment, 3_000);
     const replacementToken = await broker.register(environment);
@@ -3926,7 +3926,7 @@ describe("ChatGPT outer-native harness v4", () => {
     const broker = TurnBroker.forSocket(socketPath);
     const environment = extractChatGptTurnEnvironment(parsed(environmentXml));
     environment.tools = [
-      { name: "exec_command", description: "Run a Codex command", parameters: { type: "object" } },
+      { name: "exec_command", description: "Run a OpenCode command", parameters: { type: "object" } },
     ];
     let timedOutToken: string | undefined;
     let replacementToken: string | undefined;
@@ -4025,7 +4025,7 @@ describe("ChatGPT outer-native harness v4", () => {
     try {
       await client.connect(transport);
       token = await broker.register(environment, 1_500, "queued-timeout-turn");
-      // Codex never picks up this request; exercise the real MCP handler and broker socket.
+      // OpenCode never picks up this request; exercise the real MCP handler and broker socket.
       const response = await client.callTool({
         name: "codex_exec", arguments: { turn_token: token, cmd: "PRIVATE NEVER DELIVERED COMMAND" },
       });
@@ -4097,7 +4097,7 @@ describe("ChatGPT outer-native harness v4", () => {
           await expect(callTurnBroker(socketPath, {
             method: "release", bindingId: claimed.bindingId,
             failure: { code: "codex_tool_timeout", tool: "exec_command", timeoutMs: -1 },
-          })).rejects.toThrow("Invalid Codex tool retirement failure");
+          })).rejects.toThrow("Invalid OpenCode tool retirement failure");
         }
         const remoteRetirement = new RemoteTurnBroker(socketPath).waitForRetirement(token);
         // Queue the observer before release so both local and remote owners see the same event.

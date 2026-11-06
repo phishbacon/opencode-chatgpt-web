@@ -29,7 +29,7 @@ const {
 
 const NEW_CHAT_URL = "https://chatgpt.com/";
 const CHATGPT_ORIGIN = "https://chatgpt.com";
-const IDLE_BROWSER_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3ECodex%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
+const IDLE_BROWSER_URL = "data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Chtml%3E%3Chead%3E%3Cmeta%20charset%3D%22utf-8%22%3E%3Ctitle%3EOpenCode%20Web%20GPT%3C%2Ftitle%3E%3C%2Fhead%3E%3Cbody%3E%3C%2Fbody%3E%3C%2Fhtml%3E#codex-web-gpt-browser-host";
 const PRIMARY_VIEW_BOOTSTRAP_TIMEOUT_MS = 10_000;
 const MAX_BROWSER_VIEW_DIMENSION = 16_384;
 const MAX_BROWSER_TABS = 5;
@@ -46,7 +46,17 @@ const HIDDEN_TURN_VIEWPORT = Object.freeze({ width: 800, height: 600 });
 const TURN_HEARTBEAT_SWEEP_MS = 5_000;
 const TURN_HEARTBEAT_TIMEOUT_MS = 60_000;
 const TURN_TAB_BOOTSTRAP_TIMEOUT_MS = 120_000;
-const RETAINED_TURN_TAB_TTL_MS = 30 * 60 * 1000;
+// Finished tabs stay retained so the next turn can reuse the conversation. The idle window is
+// configurable (retainedTabIdleTimeoutSec) and only ever applies to a ready or failed tab: a
+// running tool, turn or compaction is never retired by this sweep.
+const DEFAULT_RETAINED_TURN_TAB_TTL_MS = 15 * 60 * 1000;
+
+function retainedTabIdleTimeoutMs(host) {
+  const configured = typeof host.getRetainedTabIdleTimeoutMs === "function"
+    ? host.getRetainedTabIdleTimeoutMs()
+    : undefined;
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_RETAINED_TURN_TAB_TTL_MS;
+}
 
 function recordTurnActivity(tab, now = Date.now()) {
   const state = tab.approvalPending ? "approval"
@@ -332,6 +342,7 @@ class BrowserHost {
     clipboardApi = clipboard,
     getBrowserInteractionMode = () => "automatic",
     getUseTemporaryChats = () => true,
+    getRetainedTabIdleTimeoutMs,
   }) {
     if (typeof getConnectorName !== "function") {
       throw new Error("Browser host connector-name resolver is unavailable");
@@ -362,6 +373,7 @@ class BrowserHost {
     this.clipboard = clipboardApi;
     this.getBrowserInteractionMode = getBrowserInteractionMode;
     this.getUseTemporaryChats = getUseTemporaryChats;
+    this.getRetainedTabIdleTimeoutMs = getRetainedTabIdleTimeoutMs;
     this.runBrowserHelperOperation = runBrowserHelperOperation;
     this.verifyConnectorWithBrowserHelper = verifyConnectorWithBrowserHelper;
     this.surfaceId = randomBytes(24).toString("base64url");
@@ -978,7 +990,7 @@ class BrowserHost {
       tab.conversationKey = undefined;
       if (tab.manualConversationReused && tab.status === "running") {
         tab.status = "error";
-        tab.message = "ChatGPT page changed during a resumed Zero Risk turn. Start a new Codex turn to resend the full context.";
+        tab.message = "ChatGPT page changed during a resumed Zero Risk turn. Start a new OpenCode turn to resend the full context.";
         this.signalManualTerminal(tab, "failed");
       }
       this.logger.info("browser.manual_conversation_invalidated", {
@@ -1602,16 +1614,17 @@ class BrowserHost {
       this.refreshTurnLeases("sweep_gap", now);
       return;
     }
+    const ttlMs = retainedTabIdleTimeoutMs(this);
     for (const tab of [...this.turnTabs.values()]) {
       if (tab.failedAt !== undefined) {
-        if (now - tab.failedAt < RETAINED_TURN_TAB_TTL_MS) continue;
+        if (now - tab.failedAt < ttlMs) continue;
         this.logger.info("browser.failed_tab_expired", { tabId: tab.id, traceId: tab.traceId });
         this.removeTurnTab(tab, false);
         continue;
       }
       if (tab.interactionMode === "manual") {
         if (tab.status === "ready") {
-          if (now - (tab.lastHeartbeatAt ?? 0) < RETAINED_TURN_TAB_TTL_MS) continue;
+          if (now - (tab.lastHeartbeatAt ?? 0) < ttlMs) continue;
           this.logger.info("browser.retained_tab_expired", { tabId: tab.id, traceId: tab.traceId });
           this.removeTurnTab(tab, false);
           continue;
@@ -1629,7 +1642,7 @@ class BrowserHost {
         continue;
       }
       if (tab.status === "ready") {
-        if (now - (tab.lastHeartbeatAt ?? 0) < RETAINED_TURN_TAB_TTL_MS) continue;
+        if (now - (tab.lastHeartbeatAt ?? 0) < ttlMs) continue;
         this.logger.info("browser.retained_tab_expired", { tabId: tab.id, traceId: tab.traceId });
         this.removeTurnTab(tab, false);
         continue;
@@ -2117,7 +2130,7 @@ class BrowserHost {
 
   navigate(action) {
     if (this.activeTraceId) {
-      throw new Error("Browser navigation is locked while ChatGPT is running a Codex turn");
+      throw new Error("Browser navigation is locked while ChatGPT is running a OpenCode turn");
     }
     if (this.manualOperation) {
       throw new Error(`Browser navigation is locked during ${this.manualOperation}`);
@@ -2258,7 +2271,7 @@ class BrowserHost {
         this.removeTurnTab(sameTrace, true);
         this.rememberManualTerminal(traceId, helperPid, "failed");
         const error = new Error(
-          `Zero Risk turn ${traceId} lost its original runtime owner and cannot be resumed; start a new Codex turn`,
+          `Zero Risk turn ${traceId} lost its original runtime owner and cannot be resumed; start a new OpenCode turn`,
         );
         error.code = "manual_turn_owner_lost";
         throw error;
@@ -2430,7 +2443,7 @@ class BrowserHost {
     tab.manualDeadlineAt = null;
     tab.sentAt = new Date().toISOString();
     // Keep Copy available until the connector starts, in case Sent was premature.
-    tab.message = "Prompt sent; waiting for ChatGPT to start through the Codex harness";
+    tab.message = "Prompt sent; waiting for ChatGPT to start through the OpenCode harness";
     for (const resolve of tab.manualWaiters) resolve({ status: "sent", sentAt: tab.sentAt });
     tab.manualWaiters.clear();
     this.publishState?.(this.snapshot());
@@ -2452,7 +2465,7 @@ class BrowserHost {
     tab.manualState = "running";
     tab.prompt = null;
     // Retain the digest: repeated start requests must still validate the same prompt.
-    tab.message = "ChatGPT is working through the Codex harness";
+    tab.message = "ChatGPT is working through the OpenCode harness";
     tab.lastHeartbeatAt = Date.now();
     this.publishState?.(this.snapshot());
     return this.snapshot();
@@ -3223,7 +3236,7 @@ class BrowserHost {
   async withManualOperation(name, action) {
     await this.ready();
     if (this.activeTraceId) {
-      throw new Error(`ChatGPT browser is running Codex turn ${this.activeTraceId}`);
+      throw new Error(`ChatGPT browser is running OpenCode turn ${this.activeTraceId}`);
     }
     if (this.manualOperation) {
       throw new Error(`ChatGPT browser is already busy with ${this.manualOperation}`);
@@ -3333,6 +3346,7 @@ module.exports = {
   BrowserHost,
   BrowserTurnCancelledError,
   CHATGPT_VIEWPORT_CSS,
+  DEFAULT_RETAINED_TURN_TAB_TTL_MS,
   IDLE_BROWSER_URL,
   isChatGptCloudflareChallengeResponse,
   isNewChatUrl,

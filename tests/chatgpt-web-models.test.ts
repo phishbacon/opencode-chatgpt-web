@@ -324,7 +324,7 @@ describe("fixed ChatGPT Web model routes", () => {
     expect(request.options.reasoning).toBe("medium");
   });
 
-  test("Zero Risk routing preserves its internal backend identity and only a technical Codex effort", () => {
+  test("Zero Risk routing preserves its internal backend identity and only a technical OpenCode effort", () => {
     const config = defaultConfig("full");
     config.browserInteractionMode = "manual";
     const request = parsed("chatgpt-web/zero-risk", "ultra");

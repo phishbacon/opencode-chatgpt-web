@@ -7,7 +7,7 @@ import { getConfigDir } from "./config";
 import type { InstalledCodexInterruptHook } from "./codex-integration-shared";
 
 export const MANAGED_INTERRUPT_HOOK_START =
-  "# Managed by codex-chatgpt-web: release the exact Responses request when its Codex turn is interrupted.";
+  "# Managed by codex-chatgpt-web: release the exact Responses request when its OpenCode turn is interrupted.";
 export const MANAGED_INTERRUPT_HOOK_END =
   "# End codex-chatgpt-web interrupt lifecycle hook.";
 
@@ -42,7 +42,7 @@ function posixShellArgument(value: string): string {
 
 function cmdShellArgument(value: string): string {
   if (value.includes('"') || /[\r\n]/.test(value)) {
-    throw new Error("Codex interrupt hook command contains an invalid Windows path character");
+    throw new Error("OpenCode interrupt hook command contains an invalid Windows path character");
   }
   // Codex executes command hooks through cmd.exe /C on Windows. Quoting every argument preserves
   // spaces and shell metacharacters in the installed runtime path.
@@ -94,10 +94,10 @@ export function installCodexInterruptHookCommand(
   command: string,
 ): { text: string; installed: InstalledCodexInterruptHook } {
   if (managedMarkerCount(text) !== 0 || text.includes(MANAGED_INTERRUPT_HOOK_END)) {
-    throw new Error("Codex config already contains a codex-chatgpt-web interrupt hook marker");
+    throw new Error("OpenCode config already contains a codex-chatgpt-web interrupt hook marker");
   }
   const groups = parseHookDocument(text).hooks?.Interrupt;
-  if (groups !== undefined && !Array.isArray(groups)) throw new Error("Codex Interrupt hooks must be an array");
+  if (groups !== undefined && !Array.isArray(groups)) throw new Error("OpenCode Interrupt hooks must be an array");
   const groupIndex = groups?.length ?? 0;
   const stateKey = `${canonicalConfigPath(configPath)}:interrupt:${groupIndex}:0`;
   const trustedHash = codexInterruptHookHash(command);
@@ -183,13 +183,13 @@ function parseHookDocument(text: string): HookDocument {
 }
 
 function invalidConfig(): Error {
-  return new Error("Codex config.toml could not be parsed as TOML. Back up the file, repair its syntax "
-    + "or restore a known-good backup, then retry Setup > Install into Codex > Reinstall. "
+  return new Error("OpenCode config.toml could not be parsed as TOML. Back up the file, repair its syntax "
+    + "or restore a known-good backup, then retry Setup > Install into OpenCode > Reinstall. "
     + "The launcher has not overwritten the file.");
 }
 
-const HOOK_RECOVERY = " Back up Codex config.toml, restore only the launcher's hook sections from a known-good "
-  + "backup made after successful setup, then retry Setup > Install into Codex > Reinstall. "
+const HOOK_RECOVERY = " Back up OpenCode config.toml, restore only the launcher's hook sections from a known-good "
+  + "backup made after successful setup, then retry Setup > Install into OpenCode > Reinstall. "
   + "Keep unrelated settings and hooks. If no suitable backup exists, export Activity > Export safe log and ask for help.";
 
 function withoutEmptyHookContainers(document: HookDocument): unknown {
@@ -212,8 +212,8 @@ function removeRanges(text: string, ranges: SourceRange[]): string {
 
 function locateCodexInterruptHook(text: string, installed: InstalledCodexInterruptHook): SourceRange[] {
   const changed = (detail = "The launcher's entries in hooks.Interrupt and hooks.state cannot be safely identified.") =>
-    new Error("Codex interrupt lifecycle hook changed after setup; refusing to overwrite it. " + detail + HOOK_RECOVERY);
-  const invalidJournal = () => new Error("Codex interrupt lifecycle hook journal is invalid. "
+    new Error("OpenCode interrupt lifecycle hook changed after setup; refusing to overwrite it. " + detail + HOOK_RECOVERY);
+  const invalidJournal = () => new Error("OpenCode interrupt lifecycle hook journal is invalid. "
     + "The launcher's saved setup record is inconsistent; this does not establish that config.toml is damaged. "
     + "Export Activity > Export safe log and ask for help. Do not delete or edit the integration journal.");
   if (codexInterruptHookHash(installed.command) !== installed.trustedHash) {
@@ -250,17 +250,17 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   const groups = document.hooks?.Interrupt;
   if (!Array.isArray(groups) || !sameGroup(groups[installed.groupIndex])) {
     if (Array.isArray(groups) && groups.some(sameGroup)) {
-      throw new Error("Codex interrupt lifecycle hook order changed after setup; refusing to overwrite it. "
+      throw new Error("OpenCode interrupt lifecycle hook order changed after setup; refusing to overwrite it. "
         + "The launcher's entry moved within hooks.Interrupt." + HOOK_RECOVERY);
     }
     throw changed(groups === undefined || (Array.isArray(groups) && groups[installed.groupIndex] === undefined)
-      ? "The launcher's entry is missing from hooks.Interrupt in Codex config.toml."
-      : "The launcher's command or settings in hooks.Interrupt no longer match setup in Codex config.toml.");
+      ? "The launcher's entry is missing from hooks.Interrupt in OpenCode config.toml."
+      : "The launcher's command or settings in hooks.Interrupt no longer match setup in OpenCode config.toml.");
   }
   const state = document.hooks?.state?.[installed.stateKey];
   if (!sameState(state)) throw changed(state === undefined
-    ? "The launcher's trust entry is missing from hooks.state in Codex config.toml."
-    : "The launcher's trust settings in hooks.state no longer match setup in Codex config.toml.");
+    ? "The launcher's trust entry is missing from hooks.state in OpenCode config.toml."
+    : "The launcher's trust settings in hooks.state no longer match setup in OpenCode config.toml.");
 
   const ranges: SourceRange[] = [];
   // A native config edit may discard comments. Authority comes from the exact journal, command,
@@ -268,8 +268,8 @@ function locateCodexInterruptHook(text: string, installed: InstalledCodexInterru
   for (const marker of [MANAGED_INTERRUPT_HOOK_START, MANAGED_INTERRUPT_HOOK_END]) {
     const comments = ast.comments.filter(comment => text.slice(...comment.range) === marker);
     if (comments.length > 1 || text.split(marker).length - 1 !== comments.length) {
-      throw new Error("Codex interrupt lifecycle hook markers changed after setup; refusing to overwrite them. "
-        + "The launcher's identifying comments in Codex config.toml are duplicated or embedded in a value." + HOOK_RECOVERY);
+      throw new Error("OpenCode interrupt lifecycle hook markers changed after setup; refusing to overwrite them. "
+        + "The launcher's identifying comments in OpenCode config.toml are duplicated or embedded in a value." + HOOK_RECOVERY);
     }
     for (const comment of comments) {
       let start = comment.range[0];
@@ -395,6 +395,6 @@ export function restoreCodexInterruptHook(
 
 export function verifyCodexInterruptHookRestored(text: string): void {
   if (managedMarkerCount(text) !== 0 || text.includes(MANAGED_INTERRUPT_HOOK_END)) {
-    throw new Error("Codex interrupt lifecycle hook is present while the bridge is disconnected");
+    throw new Error("OpenCode interrupt lifecycle hook is present while the bridge is disconnected");
   }
 }

@@ -8,6 +8,7 @@ import {
   DEV_CHATGPT_CONNECTOR_NAME,
   defaultBrokerEndpoint,
   defaultConfig,
+  DEFAULT_RETAINED_TAB_IDLE_TIMEOUT_SEC,
   expandUserPath,
   isWindowsPipeEndpoint,
   installedBunExecutable,
@@ -66,7 +67,7 @@ test("installed Bun discovery ignores a temporary self-extract executable", () =
   })).toBe(process.execPath);
 });
 
-test("Windows uses a stable native named pipe for the outer Codex tool broker", () => {
+test("Windows uses a stable native named pipe for the outer OpenCode tool broker", () => {
   const first = defaultBrokerEndpoint("C:\\Users\\alice\\.codex-chatgpt-web", "win32");
   const second = defaultBrokerEndpoint("C:\\Users\\alice\\.codex-chatgpt-web", "win32");
   expect(first).toBe(second);
@@ -191,6 +192,29 @@ test("existing v3 configurations deterministically retain automatic browser inte
     manualAppName: ZERO_RISK_CHATGPT_CONNECTOR_NAME,
     browserInteractionMode: "automatic",
   });
+});
+
+test("retained tab idle retirement defaults to fifteen minutes and validates its override", () => {
+  const root = join(tmpdir(), `codex-chatgpt-web-retained-tab-idle-${process.pid}-${Date.now()}`);
+  roots.push(root);
+  process.env.CODEX_CHATGPT_WEB_HOME = root;
+  mkdirSync(root, { recursive: true });
+  const config = { ...defaultConfig("browser-only") };
+  const write = () => writeFileSync(join(root, "config.json"), `${JSON.stringify(config)}\n`);
+
+  write();
+  expect(DEFAULT_RETAINED_TAB_IDLE_TIMEOUT_SEC).toBe(900);
+  expect(loadConfig().retainedTabIdleTimeoutSec).toBe(900);
+
+  config.retainedTabIdleTimeoutSec = 60;
+  write();
+  expect(loadConfig().retainedTabIdleTimeoutSec).toBe(60);
+
+  for (const invalid of [59, 86_401, 90.5, -60]) {
+    config.retainedTabIdleTimeoutSec = invalid;
+    write();
+    expect(() => loadConfig()).toThrow(/Invalid retainedTabIdleTimeoutSec/);
+  }
 });
 
 test("Zero Risk fails closed without the Launcher browser host", () => {
@@ -385,20 +409,20 @@ test("skill attachments config defaults off, reaches the adapter, and rejects in
 });
 
 
-test("the whole name after Codex is editable and only the selected mode changes", () => {
-  for (const suffix of ["Native2", "Work", "DEV", "研究_2", "a".repeat(74)]) {
+test("the whole name after OpenCode is editable and only the selected mode changes", () => {
+  for (const suffix of ["Native2", "Work", "DEV", "研究_2", "a".repeat(71)]) {
     expect(validateConnectorNameSuffix(suffix)).toBe(suffix);
     const names = resolveInteractionConnectorIdentities("automatic", "production", {}, suffix);
-    expect(names.appName).toBe(`Codex ${suffix}`);
-    expect(names.manualAppName).toBe("Codex Zero Risk");
+    expect(names.appName).toBe(`OpenCode ${suffix}`);
+    expect(names.manualAppName).toBe("OpenCode Zero Risk");
     expect(names.appName.length).toBeLessThanOrEqual(80);
     const manual = resolveInteractionConnectorIdentities("manual", "production", names, "Manual");
     expect(manual.automaticAppName).toBe(names.automaticAppName);
-    expect(manual.appName).toBe("Codex Manual");
+    expect(manual.appName).toBe("OpenCode Manual");
     expect(resolveInteractionConnectorIdentities("automatic", "production", manual).appName).toBe(names.automaticAppName);
   }
   for (const suffix of [null, 5, "", "x".repeat(75), " Work", "Work ", "x\ny", "x`y", "x@y", "--flag"]) {
-    expect(() => validateConnectorNameSuffix(suffix)).toThrow("part after Codex");
+    expect(() => validateConnectorNameSuffix(suffix)).toThrow("part after OpenCode");
   }
   expect(() => validateConnectorNameSuffix("Native")).toThrow("retired");
   expect(() => resolveInteractionConnectorIdentities("automatic", "production", {}, "Zero Risk")).toThrow("must differ");
@@ -419,15 +443,15 @@ test("stored names survive config loading without an additional naming preferenc
   for (const mode of ["automatic", "manual"] as const) {
     Object.assign(config, { browserInteractionMode: mode }, resolveInteractionConnectorIdentities(mode, "production", config));
     writeFileSync(join(root, "config.json"), JSON.stringify(config));
-    expect(loadConfig().appName).toBe(mode === "manual" ? "Codex Zero Risk" : "Codex Work");
-    expect(loadConfigForSetup().automaticAppName).toBe("Codex Work");
+    expect(loadConfig().appName).toBe(mode === "manual" ? "OpenCode Zero Risk" : "OpenCode Work");
+    expect(loadConfigForSetup().automaticAppName).toBe("OpenCode Work");
   }
   // An older locally configured name also remains exact; it is not renamed on upgrade.
-  config.automaticAppName = "Codex Native2 - Work";
+  config.automaticAppName = "OpenCode Native2 - Work";
   writeFileSync(join(root, "config.json"), JSON.stringify(config));
-  expect(loadConfigForSetup().automaticAppName).toBe("Codex Native2 - Work");
+  expect(loadConfigForSetup().automaticAppName).toBe("OpenCode Native2 - Work");
   writeFileSync(join(root, "config.json"), JSON.stringify({ ...config, manualAppName: "Another plugin" }));
-  expect(() => loadConfig()).toThrow("must start with Codex");
-  writeFileSync(join(root, "config.json"), JSON.stringify({ ...config, automaticAppName: "Codex Zero Risk", manualAppName: "Codex Manual", appName: "Codex Manual" }));
-  expect(loadConfigForSetup().automaticAppName).toBe("Codex Zero Risk");
+  expect(() => loadConfig()).toThrow("must start with OpenCode");
+  writeFileSync(join(root, "config.json"), JSON.stringify({ ...config, automaticAppName: "OpenCode Zero Risk", manualAppName: "OpenCode Manual", appName: "OpenCode Manual" }));
+  expect(loadConfigForSetup().automaticAppName).toBe("OpenCode Zero Risk");
 });

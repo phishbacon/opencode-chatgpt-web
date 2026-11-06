@@ -8,6 +8,7 @@ import {
   CHATGPT_WEB_ZERO_RISK_PRO_BACKEND_MODEL,
 } from "./chatgpt-web-models";
 import type { CodexProviderConfig } from "./types";
+import { isOpenCodeWebsiteConnectorName, openCodeWebsiteConnectorName, type WebsiteMcpContract } from "./opencode/website-connector";
 import { VERSION } from "./version";
 
 export type RuntimeMode = "browser-only" | "full";
@@ -19,9 +20,14 @@ export type SubagentProtocol = "compatibility-v1" | "native";
  * ChatGPT caches a connector's public MCP contract by connector identity. The direct turn-token
  * contract therefore has a new identity instead of mutating the retired connector in place.
  */
-export const CHATGPT_CONNECTOR_NAME = "Codex Native2";
+export const CHATGPT_CONNECTOR_NAME = "OpenCode Native2";
 export const DEV_CHATGPT_CONNECTOR_NAME = `${CHATGPT_CONNECTOR_NAME} DEV`;
-export const ZERO_RISK_CHATGPT_CONNECTOR_NAME = "Codex Zero Risk";
+export const ZERO_RISK_CHATGPT_CONNECTOR_NAME = "OpenCode Zero Risk";
+/**
+ * Historical connector name as created by the Codex-branded releases. This is
+ * a detection constant for real pre-existing ChatGPT plugins — do not rename
+ * with the product branding; new connectors use CHATGPT_CONNECTOR_NAME.
+ */
 export const LEGACY_CHATGPT_CONNECTOR_NAMES = ["Codex Native"] as const;
 
 export function isLegacyChatGptConnectorName(value: string): boolean {
@@ -36,20 +42,20 @@ export function legacyChatGptConnectorMigrationMessage(legacyName: string): stri
 }
 
 export function validateConnectorNameSuffix(value: unknown): string {
-  if (typeof value !== "string" || value.length > 74
+  if (typeof value !== "string" || value.length > 71
     || !/^[\p{L}\p{N}][\p{L}\p{N} _-]*$/u.test(value)
     || value !== value.trim()) {
-    throw new Error("The part after Codex must contain 1–74 letters, numbers, spaces, hyphens or underscores");
+    throw new Error("The part after OpenCode must contain 1–71 letters, numbers, spaces, hyphens or underscores");
   }
-  if (value === "Native") throw new Error("Codex Native is retired; choose another plugin name");
+  if (value === "Native") throw new Error("OpenCode Native is retired; choose another plugin name");
   return value;
 }
 
 function validateCurrentConnectorName(value: unknown): string {
-  if (typeof value !== "string" || !value.startsWith("Codex ")) {
-    throw new Error("Plugin names must start with Codex followed by a space");
+  if (typeof value !== "string" || !value.startsWith("OpenCode ")) {
+    throw new Error("Plugin names must start with OpenCode followed by a space");
   }
-  validateConnectorNameSuffix(value.slice(6));
+  validateConnectorNameSuffix(value.slice("OpenCode ".length));
   return value;
 }
 
@@ -70,7 +76,7 @@ export function resolveInteractionConnectorIdentities(
   let manualAppName = existing.manualAppName ?? ZERO_RISK_CHATGPT_CONNECTOR_NAME;
   if (isLegacyChatGptConnectorName(automaticAppName)) automaticAppName = defaultAutomatic;
   if (suffix !== undefined) {
-    const name = `Codex ${validateConnectorNameSuffix(suffix)}`;
+    const name = `OpenCode ${validateConnectorNameSuffix(suffix)}`;
     if (interactionMode === "manual") manualAppName = name;
     else automaticAppName = name;
   }
@@ -109,6 +115,8 @@ export interface AppConfig {
   manualAppName: string;
   browserHost: BrowserHostMode;
   browserInteractionMode: BrowserInteractionMode;
+  /** Opt-in website plugin contract for OpenCode; absent preserves upstream Codex behavior. */
+  websiteMcpContract?: WebsiteMcpContract;
   browserHostDescriptorPath?: string;
   chromeExecutablePath: string;
   storageStatePath: string;
@@ -126,6 +134,8 @@ export interface AppConfig {
   zeroRiskProEnabled: boolean;
   /** Optional adapter-silence budget for the Responses watchdog. */
   stallTimeoutSec?: number;
+  /** Idle retention for finished browser tabs; ready tabs are retired after this many seconds. */
+  retainedTabIdleTimeoutSec: number;
   autoApproveToolCalls: boolean;
   controlToken: string;
   runtimeCommand: string[];
@@ -229,6 +239,9 @@ export function preserveUtf8Bom(text: string, original: string): string {
   return original.startsWith("\uFEFF") ? `\uFEFF${stripUtf8Bom(text)}` : stripUtf8Bom(text);
 }
 
+/** Finished browser tabs stay retained for this long before the launcher retires them. */
+export const DEFAULT_RETAINED_TAB_IDLE_TIMEOUT_SEC = 15 * 60;
+
 export function defaultConfig(mode: RuntimeMode = "browser-only"): AppConfig {
   const home = getConfigDir();
   return {
@@ -258,6 +271,7 @@ export function defaultConfig(mode: RuntimeMode = "browser-only"): AppConfig {
     useTemporaryChats: true,
     zeroRiskProEnabled: false,
     autoApproveToolCalls: false,
+    retainedTabIdleTimeoutSec: DEFAULT_RETAINED_TAB_IDLE_TIMEOUT_SEC,
     controlToken: randomBytes(32).toString("base64url"),
     runtimeCommand: currentRuntimeCommand(),
   };
@@ -431,6 +445,13 @@ function parseConfig(value: unknown, path: string): AppConfig {
   if (browserInteractionMode !== "automatic" && browserInteractionMode !== "manual") {
     throw new Error(`Invalid browserInteractionMode in ${path}`);
   }
+  if (parsed.websiteMcpContract !== undefined && parsed.websiteMcpContract !== "opencode") {
+    throw new Error(`Invalid websiteMcpContract in ${path}`);
+  }
+  if (parsed.websiteMcpContract === "opencode"
+    && (parsed.mode !== "full" || browserInteractionMode !== "automatic")) {
+    throw new Error(`OpenCode website tools require full mode and automatic browser interaction in ${path}`);
+  }
   if (browserInteractionMode === "manual" && parsed.mode !== "full") {
     throw new Error(`Zero Risk requires full mode in ${path}`);
   }
@@ -458,7 +479,11 @@ function parseConfig(value: unknown, path: string): AppConfig {
   if (typeof automaticAppName !== "string" || !automaticAppName.trim() || automaticAppName.length > 80) {
     throw new Error(`Invalid automaticAppName in ${path}`);
   }
-  if (!isLegacyChatGptConnectorName(automaticAppName)) validateCurrentConnectorName(automaticAppName);
+  if (parsed.websiteMcpContract === "opencode") {
+    if (!isOpenCodeWebsiteConnectorName(automaticAppName)) {
+      throw new Error(`OpenCode website tools require connector opencode-chatgpt-web (or its DEV-harness form) in ${path}`);
+    }
+  } else if (!isLegacyChatGptConnectorName(automaticAppName)) validateCurrentConnectorName(automaticAppName);
   validateCurrentConnectorName(manualAppName);
   if (automaticAppName === manualAppName) {
     throw new Error(`Automatic and Zero Risk connector names must differ in ${path}; rerun setup`);
@@ -546,6 +571,12 @@ function parseConfig(value: unknown, path: string): AppConfig {
     && (!Number.isFinite(parsed.stallTimeoutSec) || parsed.stallTimeoutSec <= 0)) {
     throw new Error(`Invalid stallTimeoutSec in ${path}`);
   }
+  if (parsed.retainedTabIdleTimeoutSec !== undefined
+    && (!Number.isInteger(parsed.retainedTabIdleTimeoutSec)
+      || parsed.retainedTabIdleTimeoutSec < 60
+      || parsed.retainedTabIdleTimeoutSec > 86_400)) {
+    throw new Error(`Invalid retainedTabIdleTimeoutSec in ${path}`);
+  }
   const solAvailable = parsed.solAvailable !== false;
   const proAvailable = parsed.proAvailable === true;
   if (parsed.experimentalSkillAttachments !== undefined && typeof parsed.experimentalSkillAttachments !== "boolean") {
@@ -592,6 +623,7 @@ function parseConfig(value: unknown, path: string): AppConfig {
     experimentalSkillAttachments,
     experimentalFreshConversationPerTurn,
     useTemporaryChats: parsed.useTemporaryChats !== false,
+    retainedTabIdleTimeoutSec: parsed.retainedTabIdleTimeoutSec ?? DEFAULT_RETAINED_TAB_IDLE_TIMEOUT_SEC,
     zeroRiskProEnabled,
   } as AppConfig;
 }

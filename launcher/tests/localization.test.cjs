@@ -23,8 +23,14 @@ function loadI18nModule() {
       target: ts.ScriptTarget.ES2023,
     },
   }).outputText;
+  const branding = { exports: {} };
+  Function("module", "exports", "require", ts.transpileModule(
+    read("launcher", "src", "branding.ts"),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } },
+  ).outputText)(branding, branding.exports, require);
   const loaded = { exports: {} };
-  Function("module", "exports", "require", output)(loaded, loaded.exports, require);
+  Function("module", "exports", "require", output)(loaded, loaded.exports,
+    id => (id === "./branding" || id === "./branding.ts" ? branding.exports : require(id)));
   return loaded.exports;
 }
 
@@ -51,7 +57,7 @@ for (const language of Object.keys(languages).filter(language => language !== "e
   const { copyFor, localizeRuntimeMessage } = loadI18nModule();
   const copy = copyFor(language);
   const connectorNames = [
-    "Codex Native2",
+    "OpenCode Native2",
     "Native $&",
     "Native $'",
     "Native $`",
@@ -75,9 +81,9 @@ for (const language of Object.keys(languages).filter(language => language !== "e
     copy.doctorProxyHealthy.replace("{endpoint}", () => "127.0.0.1:17841"),
   );
   for (const [message, translated] of [
-    ["This runtime has not observed a completed Codex model-list request yet", copy.doctorCatalogPending],
-    ["Codex's latest model-list request succeeded", copy.doctorCatalogReady],
-    ["Codex's latest model-list request failed; the local runtime is reachable", copy.doctorCatalogFailed],
+    ["This runtime has not observed a completed OpenCode model-list request yet", copy.doctorCatalogPending],
+    ["OpenCode's latest model-list request succeeded", copy.doctorCatalogReady],
+    ["OpenCode's latest model-list request failed; the local runtime is reachable", copy.doctorCatalogFailed],
   ]) {
     assert.equal(localizeRuntimeMessage(copy, message, "model-catalog", language), translated);
   }
@@ -85,7 +91,7 @@ for (const language of Object.keys(languages).filter(language => language !== "e
 
 test("runtime message localization preserves other languages and unknown backend messages", () => {
   const { copyFor, localizeRuntimeMessage } = loadI18nModule();
-  const connectorNames = ["Codex Native2", "Native $&", "Native $'", "Native $`", 'Native "quoted"', "Native \\path"];
+  const connectorNames = ["OpenCode Native2", "Native $&", "Native $'", "Native $`", 'Native "quoted"', "Native \\path"];
 
   for (const language of ["en"]) {
     for (const connectorName of connectorNames) {
@@ -110,16 +116,16 @@ test("runtime message localization preserves other languages and unknown backend
     'ChatGPT connector "unterminated is available',
   );
   assert.equal(
-    localizeRuntimeMessage(copyFor("ja"), 'ChatGPT connector "Codex Native2" is available', "wrong-id", "ja"),
-    'ChatGPT connector "Codex Native2" is available',
+    localizeRuntimeMessage(copyFor("ja"), 'ChatGPT connector "OpenCode Native2" is available', "wrong-id", "ja"),
+    'ChatGPT connector "OpenCode Native2" is available',
   );
   assert.equal(
     localizeRuntimeMessage(copyFor("ja"), "Checking ChatGPT connector", "unknown-check", "ja"),
     "Checking ChatGPT connector",
   );
   assert.equal(
-    localizeRuntimeMessage(copyFor("ja"), 'ChatGPT connector "Codex Native2" is available (warning)', "connector", "ja"),
-    'ChatGPT connector "Codex Native2" is available (warning)',
+    localizeRuntimeMessage(copyFor("ja"), 'ChatGPT connector "OpenCode Native2" is available (warning)', "connector", "ja"),
+    'ChatGPT connector "OpenCode Native2" is available (warning)',
   );
 });
 
@@ -137,7 +143,8 @@ test("native dialogs and IPC accept exactly the renderer's supported languages",
   const main = read("launcher", "electron", "main.cjs");
   const copySource = main.slice(main.indexOf("const NATIVE_COPY ="), main.indexOf("function updateTrayMenu("));
   const validation = main.slice(main.indexOf("function validateLanguage("), main.indexOf("function validateBrowserInteractionMode("));
-  const { nativeCopyFor, validateLanguage } = Function("languages", `${copySource}\n${validation}\nreturn {nativeCopyFor, validateLanguage};`)(languages);
+  const { PRODUCT_NAME } = require("../electron/branding.cjs");
+  const { nativeCopyFor, validateLanguage } = Function("languages", "PRODUCT_NAME", `${copySource}\n${validation}\nreturn {nativeCopyFor, validateLanguage};`)(languages, PRODUCT_NAME);
   const english = nativeCopyFor("en");
   for (const language of Object.keys(languages)) {
     assert.equal(validateLanguage(language), language);
@@ -162,7 +169,7 @@ test("all locales translate known doctor success checks without changing literal
     ["config", `Configuration is valid (${fixturePath})`, "doctorConfigValid", "{path}", fixturePath],
     ["browser-host", "Embedded launcher browser is authenticated and reachable (pid 345)", "doctorBrowserReady", "{pid}", "345"],
     ["browser-host", "Embedded launcher browser is reachable for Zero Risk (pid 678)", "doctorManualBrowserReady", "{pid}", "678"],
-    ["codex", "Codex native model route is installed", "doctorCodexInstalled"],
+    ["codex", "OpenCode native model route is installed", "doctorCodexInstalled"],
     ["service", "Launcher owns the background runtime", "doctorRuntimeOwned"],
     ["chrome", `Chrome executable found: ${fixturePath}`, "doctorChromeFound", "{path}", fixturePath],
     ["login", "ChatGPT login state has authenticated browser evidence", "doctorLoginVerified"],
@@ -194,7 +201,7 @@ test("all locales translate known doctor success checks without changing literal
 
 test("plugin setup and Zero Risk instructions show configured names in every language", () => {
   const { copyFor } = loadI18nModule();
-  const names = { automatic: "Codex Work", manual: "Codex Manual" };
+  const names = { automatic: "OpenCode Work", manual: "OpenCode Manual" };
   for (const language of Object.keys(languages)) {
     const copy = copyFor(language, names);
     for (const key of ["manualMcpStepThreeBody", "manualConnectorNotice", "manualPromptInstruction", "manualPromptWaiting"]) {
@@ -202,6 +209,6 @@ test("plugin setup and Zero Risk instructions show configured names in every lan
     }
     assert.ok(copy.connectorMigrationNotice.includes(names.automatic));
     assert.ok(copy.pluginNameWarning.length > 0);
-    assert.equal(copyFor(language).manualPromptInstruction.includes("Codex Manual"), false);
+    assert.equal(copyFor(language).manualPromptInstruction.includes("OpenCode Manual"), false);
   }
 });

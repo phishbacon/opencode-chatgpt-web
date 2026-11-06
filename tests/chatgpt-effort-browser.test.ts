@@ -36,7 +36,7 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("Think uses the active editor
     for (const modern of [false, true]) {
       await page.setContent(`<div contenteditable="true" data-composer-markdown role="textbox">Unrelated editor</div>
         <form data-chatgpt-composer>
-          <div ${modern ? 'data-composer-markdown role="textbox"' : 'id="prompt-textarea"'} contenteditable="true"><span data-id="plugin:fixture" data-keyword="Codex Native2" contenteditable="false">Codex Native2</span></div>
+          <div ${modern ? 'data-composer-markdown role="textbox"' : 'id="prompt-textarea"'} contenteditable="true"><span data-id="plugin:fixture" data-keyword="OpenCode Native2" contenteditable="false">OpenCode Native2</span></div>
           ${readFileSync(new URL("./fixtures/chatgpt-composer-think.html", import.meta.url), "utf8")}
         </form><script>(()=>{
           const button=document.querySelector('button');
@@ -52,7 +52,7 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("Think uses the active editor
       expect(await page.getByRole("button", { name: "Think" }).getAttribute("aria-pressed")).toBe("true");
       await setChatGptThinkMode(composer, false);
       expect(await page.getByRole("button", { name: "Think" }).getAttribute("aria-pressed")).toBe("false");
-      expect(await composer.locator('[data-id="plugin:fixture"]').getAttribute("data-keyword")).toBe("Codex Native2");
+      expect(await composer.locator('[data-id="plugin:fixture"]').getAttribute("data-keyword")).toBe("OpenCode Native2");
       expect(await page.locator('body > [contenteditable]').innerText()).toBe("Unrelated editor");
     }
   } finally { await browser.close(); }

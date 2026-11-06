@@ -75,7 +75,7 @@ function provider(name: string): CodexProviderConfig {
     adapter: "chatgpt-web",
     baseUrl: `manual://${name}-${Date.now()}`,
     chatgptWeb: {
-      appName: "Codex Zero Risk",
+      appName: "OpenCode Zero Risk",
       browserInteractionMode: "manual",
       browserHost: "launcher",
       browserHostDescriptorPath: join(root, `${name}-launcher.json`),
@@ -103,7 +103,7 @@ for (const scenario of [
   const { BrowserHost } = require("../launcher/electron/browser-host.cjs");
   const { BrowserControlServer } = require("../launcher/electron/control-server.cjs");
   const config = provider(`compaction-owner-${scenario.format}-${scenario.finalWins}`);
-  config.chatgptWeb!.appName = "Codex Manual Work";
+  config.chatgptWeb!.appName = "OpenCode Manual Work";
   const socket = config.chatgptWeb!.brokerSocketPath!;
   const broker = TurnBroker.forSocket(socket);
   const logs: string[] = [];
@@ -144,7 +144,7 @@ for (const scenario of [
   let modelAction: Promise<void> | undefined;
   const control: ChatGptZeroRiskManualControl = {
     async start(_path, activity) {
-      expect(activity.prompt).toContain('The selected local Codex plugin for this turn is "Codex Manual Work".');
+      expect(activity.prompt).toContain('The selected local OpenCode plugin for this turn is "OpenCode Manual Work".');
       host.beginManualTurn(activity.traceId, activity.helperPid, activity.prompt,
         activity.conversationKey, activity.resumePrompt, activity.compaction);
       starts.push(activity.traceId);
@@ -448,9 +448,9 @@ test("a Zero Risk launcher failure remains failed when its own capability cleanu
   }
 });
 
-test("Zero Risk offers only the new Codex suffix when the launcher reuses its retained ChatGPT chat", async () => {
+test("Zero Risk offers only the new OpenCode suffix when the launcher reuses its retained ChatGPT chat", async () => {
   const config = provider("incremental-resume");
-  config.chatgptWeb!.appName = "Codex Manual Work";
+  config.chatgptWeb!.appName = "OpenCode Manual Work";
   const broker = TurnBroker.forSocket(config.chatgptWeb!.brokerSocketPath!);
   const input = request("turn_safe_incremental");
   input.context.messages.push(
@@ -485,7 +485,7 @@ test("Zero Risk offers only the new Codex suffix when the launcher reuses its re
       fullPrompt = activity.prompt;
       resumePrompt = activity.resumePrompt ?? "";
       for (const prompt of [fullPrompt, resumePrompt]) {
-        expect(prompt).toContain('The selected local Codex plugin for this turn is "Codex Manual Work".');
+        expect(prompt).toContain('The selected local OpenCode plugin for this turn is "OpenCode Manual Work".');
       }
       exactBinding = binding(resumePrompt);
     },

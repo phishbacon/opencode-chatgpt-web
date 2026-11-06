@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "../../branding";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -165,7 +166,15 @@ export const CHATGPT_COMPLETION_ACTION_GRACE_MS = 10 * 60_000;
 export const CHATGPT_COMPLETION_SETTLE_MS = 2_000;
 export const CHATGPT_TOOL_CONFIRMATION_TIMEOUT_MS = 60_000;
 export const MAX_CHATGPT_CONNECTOR_TRIGGER_ATTEMPTS = 3;
-const CHATGPT_CONNECTOR_MENTION_QUERY = "@codex";
+/**
+ * ChatGPT's connector mention picker filters on a prefix of the connector's display
+ * name, so the query is derived from the configured connector: upstream's
+ * "Codex Native2" triggers with "@codex" and the OpenCode plugin with "@opencode".
+ */
+export function chatGptConnectorMentionQuery(appName: string): string {
+  const head = appName.trim().split(/[\s-]+/).filter(Boolean)[0] ?? "codex";
+  return `@${head.toLowerCase()}`;
+}
 const CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS = 10_000;
 const CHATGPT_SMOKE_TEXT = "Reply with exactly: CODEX WEB GPT READY";
 const CHATGPT_SMOKE_EXPECTED = "CODEX WEB GPT READY";
@@ -417,7 +426,7 @@ const chatGptExpiredSessionAlert = (page: Page): Locator => page
 export async function throwIfChatGptSessionFailureAlert(page: Page): Promise<void> {
   if (await chatGptExpiredSessionAlert(page).isVisible().catch(() => false)) {
     throw new ChatGptWebAdapterError(
-      "The ChatGPT session has expired. Sign in again in Codex Web GPT.",
+      `The ChatGPT session has expired. Sign in again in ${PRODUCT_NAME}.`,
       { status: 401, errorType: "authentication_error", code: "chatgpt_session_expired", retryable: false },
     );
   }
@@ -740,7 +749,7 @@ export function assertChatGptWebInputWithinLimits(
     && estimatedInputTokens > CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET
   ) {
     throw new ChatGptWebAdapterError(
-      `This Luna turn requires ${estimatedInputTokens.toLocaleString("en-US")} estimated input tokens, which exceeds the measured ${CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET.toLocaleString("en-US")}-token ChatGPT Free browser transport budget. Completed Luna history is already replaced by its rolling checkpoint; the remaining payload is the current Codex turn and cannot be reduced by /compact.`,
+      `This Luna turn requires ${estimatedInputTokens.toLocaleString("en-US")} estimated input tokens, which exceeds the measured ${CHATGPT_LUNA_BROWSER_INPUT_TOKEN_BUDGET.toLocaleString("en-US")}-token ChatGPT Free browser transport budget. Completed Luna history is already replaced by its rolling checkpoint; the remaining payload is the current OpenCode turn and cannot be reduced by /compact.`,
       { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
     );
   }
@@ -816,13 +825,13 @@ export function assertChatGptWebMultipartInputWithinLimits(
     );
     if (browserComposerCharLimit !== undefined && messageChars > browserComposerCharLimit) {
       throw new ChatGptWebAdapterError(
-        `A Bigger Context ${label} contains ${messageChars.toLocaleString("en-US")} characters, which exceeds the measured ${browserComposerCharLimit.toLocaleString("en-US")}-character ChatGPT composer boundary. The bridge will not split an individual Codex message or JSON record; compact the task before retrying.`,
+        `A Bigger Context ${label} contains ${messageChars.toLocaleString("en-US")} characters, which exceeds the measured ${browserComposerCharLimit.toLocaleString("en-US")}-character ChatGPT composer boundary. The bridge will not split an individual OpenCode message or JSON record; compact the task before retrying.`,
         { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
       );
     }
     if (browserMessageTokenLimit !== undefined && messageTokens > browserMessageTokenLimit) {
       throw new ChatGptWebAdapterError(
-        `A Bigger Context ${label} requires ${messageTokens.toLocaleString("en-US")} visible message tokens, which exceeds the measured ${browserMessageTokenLimit.toLocaleString("en-US")}-token ChatGPT message boundary. The bridge will not split an individual Codex message or JSON record; compact the task before retrying.`,
+        `A Bigger Context ${label} requires ${messageTokens.toLocaleString("en-US")} visible message tokens, which exceeds the measured ${browserMessageTokenLimit.toLocaleString("en-US")}-token ChatGPT message boundary. The bridge will not split an individual OpenCode message or JSON record; compact the task before retrying.`,
         { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
       );
     }
@@ -831,7 +840,7 @@ export function assertChatGptWebMultipartInputWithinLimits(
       : resolveChatGptWebMessageTokenBudget(modelId, messageEffort, capabilities, imageTokens);
     if (messageTokens > messageBudget) {
       throw new ChatGptWebAdapterError(
-        `A Bigger Context ${label} requires ${messageTokens.toLocaleString("en-US")} visible message tokens, which exceeds its ${messageBudget.toLocaleString("en-US")}-token input budget after reserving space for ChatGPT and attachments. The bridge will not split an individual Codex message or JSON record; compact the task before retrying.`,
+        `A Bigger Context ${label} requires ${messageTokens.toLocaleString("en-US")} visible message tokens, which exceeds its ${messageBudget.toLocaleString("en-US")}-token input budget after reserving space for ChatGPT and attachments. The bridge will not split an individual OpenCode message or JSON record; compact the task before retrying.`,
         { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
       );
     }
@@ -1198,7 +1207,7 @@ export async function setChatGptThinkMode(
       throwIfPromptAttachmentAborted(abortSignal);
       if (!(error instanceof Error) || error.name !== "TimeoutError") throw error;
       throw new ChatGptWebAdapterError(
-        "ChatGPT's Luna/Think control could not be verified. Run setup again in the launcher, then restart Codex.",
+        "ChatGPT's Luna/Think control could not be verified. Run setup again in the launcher, then restart OpenCode.",
         { status: 409, errorType: "invalid_request_error", code: "chatgpt_model_controls_unavailable", retryable: false, cause: error },
       );
     }
@@ -1326,7 +1335,7 @@ export class ChatGptCompletionTracker {
       }
       this.missingPostToolAnswerSince ??= now;
       if (now - this.missingPostToolAnswerSince >= this.missingPostToolAnswerMs) {
-        throw new Error("ChatGPT completed without producing a final answer after its last Codex tool call");
+        throw new Error("ChatGPT completed without producing a final answer after its last OpenCode tool call");
       }
       return false;
     }
@@ -1946,7 +1955,7 @@ const imageExtensions = new Map([
 
 export function chatGptImageFilePayloads(images: ChatGptWebPromptImage[]): Array<{ name: string; mimeType: string; buffer: Buffer }> {
   if (images.length > CHATGPT_MAX_INPUT_IMAGES) {
-    throw new Error(`ChatGPT web accepts at most ${CHATGPT_MAX_INPUT_IMAGES} input images per Codex turn`);
+    throw new Error(`ChatGPT web accepts at most ${CHATGPT_MAX_INPUT_IMAGES} input images per OpenCode turn`);
   }
   let totalBytes = 0;
   return images.map(image => {
@@ -2327,7 +2336,7 @@ export class ChatGptBrowserWorker {
       const visibleControls = composerForm.locator(CHATGPT_EFFORT_CONTROL_SELECTOR).filter({ visible: true });
       if (await visibleControls.count() > 0) {
         throw new ChatGptWebAdapterError(
-          "The ChatGPT account exposes a model picker, but the installed Web models only include Luna. Run setup again in the launcher, then restart Codex.",
+          "The ChatGPT account exposes a model picker, but the installed Web models only include Luna. Run setup again in the launcher, then restart OpenCode.",
           { status: 409, errorType: "invalid_request_error", code: "chatgpt_capabilities_stale", retryable: false },
         );
       }
@@ -2407,7 +2416,7 @@ export class ChatGptBrowserWorker {
       if (!state.available[uiEffortIndex]) {
         throw new ChatGptWebAdapterError(
           `ChatGPT locks the browser option requested for ${mode.displayLabel} behind an upgrade. `
-          + "The message was not sent. Choose an available effort and run Repair Codex setup to refresh the model list.",
+          + "The message was not sent. Choose an available effort and run Repair OpenCode setup to refresh the model list.",
           { status: 400, errorType: "invalid_request_error", code: "chatgpt_effort_locked", retryable: false },
         );
       }
@@ -3375,7 +3384,7 @@ export class ChatGptBrowserWorker {
         await composer.fill("", { signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
         await composer.focus({ signal: abortSignal, timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS });
         await withBrowserTurnAbort(settleChatGptUi(), abortSignal);
-        await composer.pressSequentially(CHATGPT_CONNECTOR_MENTION_QUERY, {
+        await composer.pressSequentially(chatGptConnectorMentionQuery(this.config.appName), {
           delay: 25,
           signal: abortSignal,
           timeout: CHATGPT_CONNECTOR_ACTION_TIMEOUT_MS,
@@ -4916,6 +4925,7 @@ export class ChatGptBrowserWorker {
           multipartTransactionId,
           index + 1,
           prepared.multipart!.parts.length,
+          prepared.multipart!.flavor,
         ))
         : undefined;
       const multipartFinalPrompt = prepared.multipart && multipartTransactionId
@@ -5675,7 +5685,7 @@ export class ChatGptBrowserWorker {
               }
             }
             if (snapshot.visibleText === "api_tool unavailable") {
-              throw new Error("ChatGPT selected mode rejected the Codex Native MCP tool (api_tool unavailable)");
+              throw new Error("ChatGPT selected mode rejected the OpenCode Native MCP tool (api_tool unavailable)");
             }
             const final = (() => {
               try {

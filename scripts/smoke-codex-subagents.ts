@@ -12,7 +12,7 @@ const explicitChildModel = "gpt-5.6-sol";
 const explicitChildReasoningEffort = "max";
 const codexArg = process.argv.slice(2).find(argument => argument !== "--v1" && argument !== "--v2");
 const codex = resolve(codexArg ?? "/Applications/ChatGPT.app/Contents/Resources/codex");
-if (!existsSync(codex)) throw new Error(`Codex executable is missing: ${codex}`);
+if (!existsSync(codex)) throw new Error(`OpenCode executable is missing: ${codex}`);
 
 const bundled = spawnSync(codex, ["debug", "models", "--bundled"], {
   encoding: "utf8",
@@ -20,7 +20,7 @@ const bundled = spawnSync(codex, ["debug", "models", "--bundled"], {
   timeout: 15_000,
 });
 if (bundled.status !== 0) {
-  throw new Error(`Could not read bundled Codex models: ${bundled.error?.message || bundled.stderr}`);
+  throw new Error(`Could not read bundled OpenCode models: ${bundled.error?.message || bundled.stderr}`);
 }
 
 const sourceCatalog = JSON.parse(bundled.stdout) as { models?: unknown[] };
@@ -138,7 +138,7 @@ function roleOf(body: Record<string, unknown>): Role {
     return "child";
   }
   if (!inputText.includes("ROOT_LIFECYCLE")) {
-    throw new Error(`Could not classify Codex lifecycle request: ${inputText.slice(-500)}`);
+    throw new Error(`Could not classify OpenCode lifecycle request: ${inputText.slice(-500)}`);
   }
   if (threadId) rolesByThread.set(threadId, "root");
   return "root";
@@ -349,11 +349,11 @@ try {
     new Response(processHandle.stderr).text(),
   ]);
   clearTimeout(timeout);
-  if (exitCode !== 0) throw new Error(`Codex lifecycle exited ${exitCode}: ${stderr || stdout}`);
+  if (exitCode !== 0) throw new Error(`OpenCode lifecycle exited ${exitCode}: ${stderr || stdout}`);
   if (!stdout.includes("ROOT_LIFECYCLE_OK")) {
     throw new Error(
-      `Codex lifecycle did not return the root result. Observed: ${JSON.stringify([...observed])}`
-        + `\nRequests: ${JSON.stringify(requestLog)}\nCodex output: ${stdout}\n${stderr}`,
+      `OpenCode lifecycle did not return the root result. Observed: ${JSON.stringify([...observed])}`
+        + `\nRequests: ${JSON.stringify(requestLog)}\nOpenCode output: ${stdout}\n${stderr}`,
     );
   }
   for (const required of [
@@ -378,7 +378,7 @@ try {
     throw new Error(
       `${failures.join("; ")}\nObserved: ${JSON.stringify([...observed])}`
         + `\nRequests: ${JSON.stringify(requestLog)}`
-        + `\nCodex stdout: ${stdout.slice(-8_000)}\nCodex stderr: ${stderr.slice(-8_000)}`,
+        + `\nOpenCode stdout: ${stdout.slice(-8_000)}\nOpenCode stderr: ${stderr.slice(-8_000)}`,
     );
   }
   process.stdout.write(`CODEX_SUBAGENT_${protocol.toUpperCase()}_LIFECYCLE_SMOKE_OK ${JSON.stringify([...observed].toSorted())}\n`);

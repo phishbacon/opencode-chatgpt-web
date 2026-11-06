@@ -1,3 +1,4 @@
+const { PRODUCT_NAME } = require("../electron/branding.cjs");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
@@ -72,7 +73,7 @@ function replaceToolsetLibnotify(toolsetRoot, source, arch = process.arch) {
 
 async function main() {
   if (process.platform !== "linux" || !["x64", "arm64"].includes(process.arch)) {
-    throw new Error("Codex Web GPT AppImage tool preparation requires Linux x64 or arm64");
+    throw new Error(`${PRODUCT_NAME} AppImage tool preparation requires Linux x64 or arm64`);
   }
   const source = process.env.CODEX_WEB_GPT_LINUX_LIBNOTIFY?.trim();
   if (!source || !path.isAbsolute(source) || !fs.statSync(source, { throwIfNoEntry: false })?.isFile()) {

@@ -14,8 +14,8 @@ export async function runChatGptMcpMain(args: string[]): Promise<void> {
   const remaining = [...args];
   const brokerSocketPath = resolveBrokerEndpoint(option(remaining, "--broker-socket", defaultBrokerEndpoint()));
   const requestedContract = option(remaining, "--contract", "native");
-  if (requestedContract !== "native" && requestedContract !== "safe") {
-    throw new Error(`--contract must be native or safe, received ${requestedContract}`);
+  if (requestedContract !== "native" && requestedContract !== "safe" && requestedContract !== "opencode") {
+    throw new Error(`--contract must be native, safe, or opencode, received ${requestedContract}`);
   }
   if (remaining.length > 0) throw new Error(`Unknown MCP arguments: ${remaining.join(" ")}`);
   await runChatGptMcpServer({

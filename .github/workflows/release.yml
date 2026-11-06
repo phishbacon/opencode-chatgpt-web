@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
@@ -68,7 +69,7 @@ jobs:
           test -n "$archive"
           stage="$(mktemp -d)"
           ditto -x -k "$archive" "$stage"
-          codesign --verify --deep --strict --verbose=2 "$stage/Codex Web GPT.app"
+          codesign --verify --deep --strict --verbose=2 "$stage/OpenCode ChatGPT Web.app"
       - name: Archive runtime
         if: runner.os != 'Windows'
         run: tar -czf "${{ matrix.runtime_asset }}" -C launcher/build/runtime .
@@ -86,6 +87,72 @@ jobs:
             launcher/artifacts/*.exe
             launcher/artifacts/*.AppImage
           if-no-files-found: error
+
+  container:
+    name: Publish browser container
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build image
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          image="ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=${image}" >> "$GITHUB_ENV"
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${GITHUB_REF_NAME}" \
+            --label "org.opencontainers.image.title=OpenCode ChatGPT Web browser container" \
+            --label "org.opencontainers.image.description=Electron ChatGPT browser, Responses bridge, turn broker, tunnel-client and website MCP with Xvnc/noVNC for interactive login" \
+            -t "${IMAGE}:${GITHUB_REF_NAME}" \
+            .
+      # The published image must carry the whole noVNC login stack: Xvnc,
+      # websockify, the noVNC web client, env-driven VNC auth, the loopback
+      # bridge relay and a booting Electron. Prove every piece before push.
+      - name: Smoke-test the noVNC setup inside the image
+        run: |
+          set -euo pipefail
+          mkdir -p ci-secrets
+          printf 'ci-dummy-turn-signing-key\n' > ci-secrets/turn-signing.key
+          printf 'ci-dummy-tunnel-runtime-key\n' > ci-secrets/tunnel-runtime.key
+          docker run -d --name novnc-smoke \
+            -e VNC_PASSWORD="ci-smoke-pass" \
+            -e TUNNEL_ID="tunnel_ci_smoke_00000000000000000000000000" \
+            -v "$PWD/ci-secrets/turn-signing.key:/run/secrets/turn-signing.key:ro" \
+            -v "$PWD/ci-secrets/tunnel-runtime.key:/run/secrets/tunnel-runtime.key:ro" \
+            -p 127.0.0.1:18086:6080 \
+            "${IMAGE}:${GITHUB_REF_NAME}" >/dev/null
+          ok=""
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18086/vnc.html > novnc-page.html; then ok=1; break; fi
+            sleep 2
+          done
+          test -n "$ok"
+          grep -qi "noVNC" novnc-page.html
+          # A static asset beyond the page itself, so the client can actually run.
+          curl -fsS http://127.0.0.1:18086/core/rfb.js > /dev/null || curl -fsS http://127.0.0.1:18086/core/ui.js > /dev/null
+          docker exec novnc-smoke sh -c 'command -v Xvnc >/dev/null && command -v websockify >/dev/null && pgrep -f "electron .*--no-sandbox" >/dev/null && pgrep socat >/dev/null'
+          docker logs novnc-smoke 2>&1 | grep -q "noVNC authentication uses VNC_PASSWORD"
+          docker rm -f novnc-smoke >/dev/null
+      - name: Push image
+        run: |
+          docker push "${IMAGE}:${GITHUB_REF_NAME}"
+          # Prerelease tags (v1.2.3-rc1) never move the rolling latest tag.
+          if [[ "$GITHUB_REF_NAME" != *-* ]]; then
+            docker tag "${IMAGE}:${GITHUB_REF_NAME}" "${IMAGE}:latest"
+            docker push "${IMAGE}:latest"
+          fi
 
   publish:
     needs: build

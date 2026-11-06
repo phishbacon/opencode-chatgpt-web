@@ -22,10 +22,10 @@ turndown.addRule("removeSvg", {
   filter: node => node.nodeName === "SVG",
   replacement: () => "",
 });
-turndown.addRule("preserveCodexPlanBlockTags", {
+turndown.addRule("preserveOpenCodePlanBlockTags", {
   filter: "p",
   replacement: content => {
-    // Codex recognizes these standalone control lines verbatim. Restore only paragraph text:
+    // OpenCode recognizes these standalone control lines verbatim. Restore only paragraph text:
     // a post-conversion replacement would also rewrite literal escapes in fenced code.
     const paragraph = content.replace(/^([ \t]*)<(\/?)proposed\\_plan>([ \t]*)$/gm, "$1<$2proposed_plan>$3");
     return `\n\n${paragraph}\n\n`;
@@ -424,7 +424,7 @@ export class ChatGptMarkdownBuffer {
       if (!followsVisibleCommittedTail && !sawPending && !this.matchesLatestPending(segment)) {
         const tail = this.committed.at(-1)!;
         return new ChatGptMarkdownConsistencyError(
-          "ChatGPT final DOM could not be aligned with text already streamed to Codex",
+          "ChatGPT final DOM could not be aligned with text already streamed to OpenCode",
           {
             reason: "unanchored_block",
             observedStart: segment.sourceStart, observedEnd: segment.sourceEnd,
@@ -474,7 +474,7 @@ export class ChatGptMarkdownBuffer {
     if (remaining.length === 1) return remaining[0]!.index;
     if (remaining.length > 1) {
       if (afterIndex >= 0 && remaining[0]!.index === afterIndex + 1) return remaining[0]!.index;
-      return new ChatGptMarkdownConsistencyError("ChatGPT final DOM has ambiguous repeated text already streamed to Codex");
+      return new ChatGptMarkdownConsistencyError("ChatGPT final DOM has ambiguous repeated text already streamed to OpenCode");
     }
     // A known pending tail can survive removal of its committed prefix. Without
     // that evidence, an unseen earlier occurrence is a reorder, not new text.
@@ -523,7 +523,7 @@ export class ChatGptMarkdownBuffer {
     committedIndex: number,
   ): ChatGptMarkdownConsistencyError {
     return new ChatGptMarkdownConsistencyError(
-      "ChatGPT changed a completed text block that was already streamed to Codex",
+      "ChatGPT changed a completed text block that was already streamed to OpenCode",
       {
         reason,
         observedStart: observed.sourceStart,

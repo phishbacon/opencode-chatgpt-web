@@ -314,7 +314,7 @@ test("HTTP turn cancellation aborts the tracked request and waits for lifecycle 
   expect(turns.count()).toBe(0);
 });
 
-test("native Codex interrupt cancels only HTTP streams owned by the exact thread and turn", async () => {
+test("native OpenCode interrupt cancels only HTTP streams owned by the exact thread and turn", async () => {
   const turns = new HttpTurnCounter();
   const started: Promise<Response>[] = [];
   const aborted: string[] = [];
@@ -343,7 +343,7 @@ test("native Codex interrupt cancels only HTTP streams owned by the exact thread
   await expect(started[1]!).rejects.toThrow("Active HTTP turns cancelled");
 });
 
-test("native Codex interrupt remains authoritative when it arrives before HTTP identity binding", async () => {
+test("native OpenCode interrupt remains authoritative when it arrives before HTTP identity binding", async () => {
   const turns = new HttpTurnCounter();
   const identity = { threadId: "thread_interrupt_race", turnId: "turn_interrupt_race" };
   let bind!: () => void;
@@ -691,7 +691,7 @@ test("Interrupt cancels a detached structured compaction by exact native turn id
       status: "ok",
       cancelled_compaction_runs: 1,
     });
-    await expect(run).rejects.toThrow("Codex turn interrupted");
+    await expect(run).rejects.toThrow("OpenCode turn interrupted");
     expect(aborted).toBeTrue();
   } finally {
     await server.stop(true);
@@ -884,7 +884,7 @@ test("authenticated cancel-all aborts fresh structured compaction work", async (
   }
 });
 
-test("a Codex retry after tab cancellation receives terminal HTTP 400 without a new browser", async () => {
+test("a OpenCode retry after tab cancellation receives terminal HTTP 400 without a new browser", async () => {
   const config = defaultConfig("browser-only");
   const turnId = "turn_cancelled_replay";
   const body = {
@@ -920,7 +920,7 @@ test("a Codex retry after tab cancellation receives terminal HTTP 400 without a 
 
   try {
     expect(await chatGptTurnSessions.cancelTrace(traceId)).toBe(1);
-    expect(chatGptTurnSessions.cancelledError(traceId)?.message).toContain("Codex turn was cancelled");
+    expect(chatGptTurnSessions.cancelledError(traceId)?.message).toContain("OpenCode turn was cancelled");
     let adapterConstructions = 0;
     const response = await responseRequest(new Request("http://127.0.0.1:17841/v1/responses", {
       method: "POST",
@@ -936,7 +936,7 @@ test("a Codex retry after tab cancellation receives terminal HTTP 400 without a 
       error: {
         type: "client_closed_request",
         code: "client_cancelled",
-        message: "The ChatGPT browser tab was closed, so the Codex turn was cancelled.",
+        message: "The ChatGPT browser tab was closed, so the OpenCode turn was cancelled.",
       },
     });
     expect(adapterConstructions).toBe(0);
@@ -989,7 +989,7 @@ test("a restart recovery turn without a new user instruction fails terminally in
     error: {
       code: "invalid_request_error",
       type: "invalid_request_error",
-      message: "ChatGPT web current user message conflicts with native Codex turn_id metadata",
+      message: "ChatGPT web current user message conflicts with native OpenCode turn_id metadata",
     },
   });
   expect(adapterConstructions).toBe(0);
@@ -1147,7 +1147,7 @@ test("a drained runtime rejects new model-catalog work before shutdown", async (
   }
 });
 
-test("health proves that Codex received a successful augmented model catalog", async () => {
+test("health proves that OpenCode received a successful augmented model catalog", async () => {
   const config = { ...defaultConfig("browser-only"), port: 0 };
   const server = startServer(config, {
     fetchUpstream: async () => Response.json({

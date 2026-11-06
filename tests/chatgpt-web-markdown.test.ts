@@ -91,16 +91,16 @@ test("turns observed inline file path formats into Markdown links", () => {
       target: "/Users/example/codex-chatgpt-web/output/path-format-probe/epsilon-report.pdf",
     },
     {
-      path: String.raw`C:\Users\Dev\Documents\Codex\path-format-probe\zeta-result.pdf`,
-      target: "C:/Users/Dev/Documents/Codex/path-format-probe/zeta-result.pdf",
+      path: String.raw`C:\Users\Dev\Documents\OpenCode\path-format-probe\zeta-result.pdf`,
+      target: "C:/Users/Dev/Documents/OpenCode/path-format-probe/zeta-result.pdf",
     },
     {
-      path: String.raw`C:\Codex_Project_Unity\_Editor\file.cs`,
-      target: "C:/Codex_Project_Unity/_Editor/file.cs",
+      path: String.raw`C:\OpenCode_Project_Unity\_Editor\file.cs`,
+      target: "C:/OpenCode_Project_Unity/_Editor/file.cs",
     },
     {
-      path: String.raw`C:\Codex_Project_Unity\_file.cs`,
-      target: "C:/Codex_Project_Unity/_file.cs",
+      path: String.raw`C:\OpenCode_Project_Unity\_file.cs`,
+      target: "C:/OpenCode_Project_Unity/_file.cs",
     },
     {
       path: String.raw`\\server\share_name\_Editor\file.cs`,
@@ -168,7 +168,7 @@ test("converts Obsidian aliases and headings but preserves code examples and emb
   ].join("\n"));
 });
 
-test("preserves standalone Codex plan markers in paragraphs and list continuations", () => {
+test("preserves standalone OpenCode plan markers in paragraphs and list continuations", () => {
   expect(chatGptHtmlToMarkdown([
     "<p>&lt;proposed_plan&gt;</p>",
     "<h2>Plan</h2>",

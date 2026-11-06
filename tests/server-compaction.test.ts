@@ -206,7 +206,7 @@ test("compacts legacy and named Pro tasks with Pro effort and preserves the sele
   }
 });
 
-test("preserves canonical Codex turn metadata from the compact endpoint header", async () => {
+test("preserves canonical OpenCode turn metadata from the compact endpoint header", async () => {
   const turnMetadata = { thread_id: "thread_compact", turn_id: "turn_compact" };
   const response = await compactRequest(new Request("http://127.0.0.1:17841/v1/responses/compact", {
     method: "POST",
@@ -615,7 +615,7 @@ test("Luna rejects separate native compaction instead of opening another browser
   expect(adapterStarted).toBeFalse();
   const body = await response.json() as { error: { message: string } };
   expect(body.error.message).toContain("rolling checkpoint");
-  expect(body.error.message).toContain("separate Codex compaction is disabled");
+  expect(body.error.message).toContain("separate OpenCode compaction is disabled");
 });
 
 test("Luna rejects a remote-v2 compaction trigger before opening another browser turn", async () => {
@@ -726,5 +726,5 @@ test("refuses a ChatGPT Web continuation when local previous-response state is u
 
   expect(response.status).toBe(409);
   const body = await response.json() as { error: { message: string } };
-  expect(body.error.message).toContain("partial Codex context");
+  expect(body.error.message).toContain("partial OpenCode context");
 });

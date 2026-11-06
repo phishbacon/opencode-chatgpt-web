@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./../src/branding";
 import { expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +44,7 @@ test("hook errors identify the damaged section without exposing config values", 
   }
 });
 
-test("invalid saved setup records are not diagnosed as a broken Codex config", () => {
+test("invalid saved setup records are not diagnosed as a broken OpenCode config", () => {
   const { text, installed } = installCodexInterruptHookCommand("", "/fixture/config.toml", "bridge-hook");
   for (const journal of [
     { ...installed, trustedHash: "sha256:wrong" },
@@ -124,7 +125,7 @@ test("removes only the owned element of a native inline hook array", () => {
   expect(Bun.TOML.parse(again)).toEqual(Bun.TOML.parse(restored));
 });
 
-test("installs one narrowly trusted Interrupt hook and restores the exact Codex config", () => {
+test("installs one narrowly trusted Interrupt hook and restores the exact OpenCode config", () => {
   const original = [
     'model = "gpt-5.6-sol"',
     "",
@@ -134,7 +135,7 @@ test("installs one narrowly trusted Interrupt hook and restores the exact Codex 
     'command = "existing-hook"',
     "",
   ].join("\n");
-  const config = { runtimeCommand: ["/opt/Codex Web/runtime/bun", "/opt/Codex Web/app/cli.js"] };
+  const config = { runtimeCommand: ["/opt/OpenCode Web/runtime/bun", "/opt/OpenCode Web/app/cli.js"] };
   const installed = installCodexInterruptHook(original, "/Users/test/.codex/config.toml", config);
 
   expect(installed.installed.groupIndex).toBe(1);
@@ -147,7 +148,7 @@ test("installs one narrowly trusted Interrupt hook and restores the exact Codex 
   verifyCodexInterruptHookRestored(original);
 });
 
-test("trusts the canonical Codex config path before a new config file exists", () => {
+test("trusts the canonical OpenCode config path before a new config file exists", () => {
   const directory = mkdtempSync(join(tmpdir(), "codex-interrupt-hook-"));
   try {
     const configPath = join(directory, "config.toml");
@@ -162,20 +163,20 @@ test("trusts the canonical Codex config path before a new config file exists", (
 
 test("Interrupt hook command is absolute, quoted, and bound to the exact application home", () => {
   expect(codexInterruptHookCommand(
-    { runtimeCommand: ["/Applications/Codex Web GPT.app/runtime/bun", "/Applications/Codex Web GPT.app/app/cli.js"] },
-    "/Users/test/Application Support/Codex Web GPT",
+    { runtimeCommand: [`/Applications/${PRODUCT_NAME}.app/runtime/bun`, `/Applications/${PRODUCT_NAME}.app/app/cli.js`] },
+    `/Users/test/Application Support/${PRODUCT_NAME}`,
     "darwin",
   )).toBe(
-    "'/Applications/Codex Web GPT.app/runtime/bun' '/Applications/Codex Web GPT.app/app/cli.js'"
-      + " '--home' '/Users/test/Application Support/Codex Web GPT' 'hook' 'interrupt'",
+    `'/Applications/${PRODUCT_NAME}.app/runtime/bun' '/Applications/${PRODUCT_NAME}.app/app/cli.js'`
+      + ` '--home' '/Users/test/Application Support/${PRODUCT_NAME}' 'hook' 'interrupt'`,
   );
   expect(codexInterruptHookCommand(
-    { runtimeCommand: ["C:\\Program Files\\Codex Web GPT\\bun.exe", "C:\\Program Files\\Codex Web GPT\\cli.js"] },
-    "C:\\Users\\test\\Codex Web GPT",
+    { runtimeCommand: [`C:\\Program Files\\${PRODUCT_NAME}\\bun.exe`, `C:\\Program Files\\${PRODUCT_NAME}\\cli.js`] },
+    `C:\\Users\\test\\${PRODUCT_NAME}`,
     "win32",
   )).toBe(
-    '"C:\\Program Files\\Codex Web GPT\\bun.exe" "C:\\Program Files\\Codex Web GPT\\cli.js"'
-      + ' "--home" "C:\\Users\\test\\Codex Web GPT" "hook" "interrupt"',
+    `"C:\\Program Files\\${PRODUCT_NAME}\\bun.exe" "C:\\Program Files\\${PRODUCT_NAME}\\cli.js"`
+      + ` "--home" "C:\\Users\\test\\${PRODUCT_NAME}" "hook" "interrupt"`,
   );
 });
 
@@ -300,7 +301,7 @@ test("keeps foreign TOML tables inserted between the managed hook and its trust 
   }
 });
 
-test("preserves ownership when Codex moves trust state before the hook and normalizes boundary newlines", () => {
+test("preserves ownership when OpenCode moves trust state before the hook and normalizes boundary newlines", () => {
   for (const ending of ["\n", "\r\n", "\r"]) {
     const original = 'model = "example"\n'.replaceAll("\n", ending);
     const { text, installed } = installCodexInterruptHook(original, "/Users/test/.codex/config.toml", {
@@ -332,7 +333,7 @@ test("accepts a literal-quoted trust-state key while preserving another config p
   const original = 'model = "example"\n';
   const installed = installCodexInterruptHook(original, "/Users/test/.codex/config.toml", { runtimeCommand: ["/opt/runtime"] });
   // Use the Windows key from #443 without depending on this test host's path resolver.
-  const stateKey = String.raw`D:\AppData\Codex\UserData\config.toml:interrupt:0:0`;
+  const stateKey = String.raw`D:\AppData\OpenCode\UserData\config.toml:interrupt:0:0`;
   const beforeHeader = `[hooks.state.${JSON.stringify(installed.installed.stateKey)}]`;
   const journalHeader = `[hooks.state.${JSON.stringify(stateKey)}]`;
   const journal = {

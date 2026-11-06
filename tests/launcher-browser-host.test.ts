@@ -198,7 +198,7 @@ test("launcher turn control sends authenticated lifecycle events", async () => {
       traceId: "abc123def456",
       helperPid: process.pid,
       conversationKey: "a".repeat(64),
-      connectorIdentity: "Codex Native2",
+      connectorIdentity: "OpenCode Native2",
       requireRetainedConversation: true,
     })).resolves.toEqual({
       surfaceId: "launcher_surface_id_0123456789AB",
@@ -212,7 +212,7 @@ test("launcher turn control sends authenticated lifecycle events", async () => {
       traceId: "abc123def456",
       helperPid: process.pid,
       conversationKey: "a".repeat(64),
-      connectorIdentity: "Codex Native2",
+      connectorIdentity: "OpenCode Native2",
       requireRetainedConversation: true,
     });
     await notifyLauncherTurn(path, {

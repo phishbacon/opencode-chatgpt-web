@@ -259,19 +259,19 @@ export function getTrustedCodexHomes(primary = getCodexHome(), additional?: read
   if (registered === undefined) {
     const raw = process.env.CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES?.trim();
     if (!raw) return [primary];
-    if (raw.length > 4096) throw new Error("Trusted Codex homes configuration is too large");
+    if (raw.length > 4096) throw new Error("Trusted OpenCode homes configuration is too large");
     try { registered = JSON.parse(raw); }
     catch { throw new Error("CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES must be a JSON array of absolute directories"); }
   }
   if (!Array.isArray(registered) || registered.length > 7
     || registered.some(path => typeof path !== "string" || !isAbsolute(path) || /^(?:\\\\|\/\/)/.test(path))) {
-    throw new Error("Trusted Codex homes must contain at most seven additional absolute local directories");
+    throw new Error("Trusted OpenCode homes must contain at most seven additional absolute local directories");
   }
   if (registered.length === 0) return [primary];
   const homes = new Map<string, string>();
   for (const configured of [primary, ...registered]) {
     if (!isAbsolute(configured) || !existsSync(configured) || !lstatSync(configured).isDirectory()) {
-      throw new Error("A trusted Codex home is not an existing directory");
+      throw new Error("A trusted OpenCode home is not an existing directory");
     }
     const path = realpathSync(configured);
     const identity = process.platform === "win32" ? path.toLowerCase() : path;
@@ -314,7 +314,7 @@ export function snapshotFile(path: string, options?: { followSymlink?: boolean }
       const link = readlinkSync(path);
       const target = realpathSync(path);
       const targetStat = lstatSync(target);
-      if (!targetStat.isFile()) throw new Error(`Codex config symlink target is not a regular file: ${path}`);
+      if (!targetStat.isFile()) throw new Error(`OpenCode config symlink target is not a regular file: ${path}`);
       return { path, exists: true, data: readFileSync(target), symlink: { link, target, mode: targetStat.mode & 0o777 } };
     }
   }
@@ -333,7 +333,7 @@ export function writeFileSnapshot(snapshot: FileSnapshot, data: string | Uint8Ar
   if (!lstatSync(snapshot.path).isSymbolicLink()
     || readlinkSync(snapshot.path) !== symlink.link
     || realpathSync(snapshot.path) !== symlink.target) {
-    throw new Error(`Codex config symlink changed during the operation: ${snapshot.path}`);
+    throw new Error(`OpenCode config symlink changed during the operation: ${snapshot.path}`);
   }
   atomicWriteFile(symlink.target, data, { mode: symlink.mode, protectDirectory: false });
 }
@@ -370,7 +370,7 @@ export function writeFilesWithCompensation(
     const primary = error instanceof Error ? error.message : String(error);
     throw new Error(
       rollbackFailures.length > 0
-        ? `${primary}; Codex integration rollback also failed: ${rollbackFailures.join("; ")}`
+        ? `${primary}; OpenCode integration rollback also failed: ${rollbackFailures.join("; ")}`
         : primary,
     );
   }

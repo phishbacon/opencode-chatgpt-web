@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "../../branding";
 import { createHash, randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -15,7 +16,7 @@ interface ClaimedTurn {
   environment: ChatGptTurnEnvironment & { expiresAt?: number };
 }
 
-export type ChatGptMcpContract = "native" | "safe";
+export type ChatGptMcpContract = "native" | "safe" | "opencode";
 
 const BRIDGE_TOOL_NAMES = new Set([
   "codex_turn_start",
@@ -26,6 +27,8 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_tool_inventory",
   "codex_tool_call",
   "codex_turn_complete",
+  "opencode_tool_inventory",
+  "opencode_tool_call",
 ]);
 
 const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
@@ -43,15 +46,15 @@ const jsonArgumentsSchema = z.record(z.string(), z.unknown()).default({});
 export const CHATGPT_WEB_AGENT_WAIT_POLL_MS = 30_000;
 export const CHATGPT_WEB_COMMAND_POLL_MAX_MS = 60_000;
 const COMMAND_POLL_TRANSPORT_RULE = `ChatGPT Web transport rule: write_stdin yield_time_ms must be at most ${CHATGPT_WEB_COMMAND_POLL_MAX_MS}. A running command returns partial output and its session_id; return after each poll and use a separate MCP call to poll again if needed. Longer waits are rejected before execution because they can exceed the MCP deadline.`;
-const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the Codex default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
+const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly ${CHATGPT_WEB_AGENT_WAIT_POLL_MS / 1_000} seconds per call, matching the OpenCode default, then release the MCP channel so spawned Web agents can use their own tools. A wait timeout is not task completion; check agent progress and wait again if needed. Keep the native tool's declared arguments.`;
 // The OpenAI tunnel currently owns a two-minute command-response deadline. The local MCP server
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
 // letting the tunnel tear down and poison its long-lived stdio transport.
 export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
 
 const ZERO_RISK_MCP_INSTRUCTIONS = [
-  "For each pasted Codex Web GPT request, begin with codex_turn_start using the request_id in its request block.",
-  "Use that request_id with the Codex tools needed for the task.",
+  `For each pasted ${PRODUCT_NAME} request, begin with codex_turn_start using the request_id in its request block.`,
+  "Use that request_id with the OpenCode tools needed for the task.",
   "When the task is finished, send the complete answer with codex_turn_complete.",
   "If a tool returns an error, report that error instead of changing the request_id.",
 ].join(" ");
@@ -138,7 +141,7 @@ function safeVisibleTools(environment: ChatGptTurnEnvironment, contract: ChatGpt
     && !BRIDGE_TOOL_NAMES.has(tool.name)
     // Zero Risk does not expose model-authored JavaScript. Automatic Full mode keeps the native
     // Codex exec surface and applies its transport guard at invocation time below.
-    && (tool.namespace !== undefined || tool.name !== "exec")
+    && (contract === "opencode" || tool.namespace !== undefined || tool.name !== "exec")
     && (!tool.namespace || !bridgeNamespaces.has(tool.namespace))
   ));
 }
@@ -380,11 +383,11 @@ function execGatewayProgram(
   excludedNames: string[],
 ): string {
   if (!gatewayToolNameIsValid(nestedToolName) || excludedNames.includes(nestedToolName)) {
-    throw new Error(`Codex nested tool is not available in this turn: ${nestedToolName}`);
+    throw new Error(`OpenCode nested tool is not available in this turn: ${nestedToolName}`);
   }
   const gatewayName = gatewayNestedToolName(nestedToolName);
   if (gatewayName !== nestedToolName) {
-    throw new Error(`Codex nested tool name is invalid: ${nestedToolName}`);
+    throw new Error(`OpenCode nested tool name is invalid: ${nestedToolName}`);
   }
   const nestedInput = freeform ? payload.input ?? "" : payload.arguments ?? {};
   return execGatewayResultProgram([
@@ -489,7 +492,7 @@ export async function runChatGptMcpServer(options: {
 }): Promise<void> {
   const contract = options.contract ?? "native";
   const server = new McpServer(
-    { name: contract === "safe" ? "codex-safe" : "codex-native", version: VERSION },
+    { name: contract === "safe" ? "codex-safe" : contract === "opencode" ? "opencode-native" : "codex-native", version: VERSION },
     contract === "safe" ? { instructions: ZERO_RISK_MCP_INSTRUCTIONS } : undefined,
   );
 
@@ -514,7 +517,7 @@ export async function runChatGptMcpServer(options: {
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
-          `Codex Native claim failed: ${error instanceof Error ? error.message : String(error)}. Its broker activity could not be retired.`,
+          `OpenCode Native claim failed: ${error instanceof Error ? error.message : String(error)}. Its broker activity could not be retired.`,
           { cause: error },
         );
       }
@@ -538,7 +541,7 @@ export async function runChatGptMcpServer(options: {
     }
     throw new AggregateError(
       [firstError],
-      "Codex Native broker activity cleanup failed after an idempotent retry",
+      "OpenCode Native broker activity cleanup failed after an idempotent retry",
     );
   };
 
@@ -563,8 +566,8 @@ export async function runChatGptMcpServer(options: {
     server.registerTool(
       "codex_turn_start",
       {
-        title: "Connect a Codex Zero Risk request",
-        description: "Connect the request_id included in the pasted Codex Web GPT request so its Codex tools can be used.",
+        title: "Connect a OpenCode Zero Risk request",
+        description: `Connect the request_id included in the pasted ${PRODUCT_NAME} request so its OpenCode tools can be used.`,
         inputSchema: {
           request_id: turnTokenSchema,
         },
@@ -619,7 +622,7 @@ export async function runChatGptMcpServer(options: {
       } catch (releaseError) {
         throw new AggregateError(
           [error, releaseError],
-          "Codex Native invocation failed and its abandoned broker binding could not be retired",
+          "OpenCode Native invocation failed and its abandoned broker binding could not be retired",
         );
       }
       if (error instanceof TurnBrokerTimeoutError) {
@@ -634,7 +637,7 @@ export async function runChatGptMcpServer(options: {
           timeout_ms: timeoutMs,
           retryable: false,
           ...(diagnostics === undefined ? {} : { broker_state_at_retirement: diagnostics }),
-          message: `Codex tool ${toolName} did not complete before the MCP transport deadline. The current turn binding was retired; do not retry it in this ChatGPT response. Delivery confirms handoff to Codex; execution and approval status are unknown.`,
+          message: `OpenCode tool ${toolName} did not complete before the MCP transport deadline. The current turn binding was retired; do not retry it in this ChatGPT response. Delivery confirms handoff to OpenCode; execution and approval status are unknown.`,
         }, true);
       }
       throw error;
@@ -651,18 +654,102 @@ export async function runChatGptMcpServer(options: {
   ) => {
     const gateway = execGateway(bound);
     if (!gateway) {
-      throw new Error(`This Codex turn did not advertise ${nestedToolName} or the native exec gateway`);
+      throw new Error(`This OpenCode turn did not advertise ${nestedToolName} or the native exec gateway`);
     }
     return invoke(bindingId, bound, gateway, {
       input: execGatewayProgram(nestedToolName, freeform, payload, bound.tools.map(wireName)),
     }, signal);
   };
 
+  // The original Codex website harness exposes Codex-native commands and an optional
+  // nested exec gateway. OpenCode uses this same broker/turn lifecycle, but forwards
+  // only the tools supplied by its own authenticated provider request. The browser
+  // may discover and request those tools; OpenCode alone executes and approves them.
+  if (contract === "opencode") {
+    server.registerTool(
+      "opencode_tool_inventory",
+      {
+        title: "Discover tools in the originating OpenCode turn",
+        description: "List only the tools advertised by this authenticated OpenCode turn. Use the returned exact wire_name when calling a tool; deferred tools may require invoking a listed tool_search entry.",
+        inputSchema: {
+          turn_token: nativeTurnTokenSchema,
+          query: z.string().max(500).optional(),
+          offset: z.number().int().min(0).max(100_000).default(0),
+          limit: z.number().int().min(1).max(50).default(20),
+          include_schema: z.boolean().default(true),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async ({ turn_token, query, offset, limit, include_schema }, extra) => withClaimedTurn(
+        "opencode_tool_inventory", turn_token, extra, claimed => {
+          const visibleTools = safeVisibleTools(claimed.environment, "opencode");
+          const needle = query?.trim().toLowerCase();
+          const matches = visibleTools.filter(tool => !needle || [
+            wireName(tool), tool.name, tool.namespace ?? "", tool.description,
+          ].join("\n").toLowerCase().includes(needle));
+          const toEntry = (tool: CodexTool) => ({
+            wire_name: wireName(tool),
+            name: tool.name,
+            namespace: tool.namespace ?? null,
+            description: browserToolDescription(tool),
+            kind: tool.freeform ? "freeform" : tool.toolSearch ? "tool_search" : "function",
+            ...(include_schema ? { parameters: browserToolParameters(tool) } : {}),
+          });
+          const page = matches.slice(offset, offset + limit).map(toEntry);
+          const discovery = needle && matches.length === 0
+            ? visibleTools.filter(tool => tool.toolSearch).map(toEntry)
+            : [];
+          return result({
+            tools: page,
+            total: matches.length,
+            next_offset: offset + page.length < matches.length ? offset + page.length : null,
+            ...(discovery.length ? { discovery_tools: discovery } : {}),
+          });
+        },
+      ),
+    );
+    server.registerTool(
+      "opencode_tool_call",
+      {
+        title: "Invoke a tool in the originating OpenCode turn",
+        description: "Call an exact wire_name from opencode_tool_inventory. OpenCode handles authorization, execution, results and the tool lifecycle. A retry of an uncertain side effect must never be assumed safe.",
+        inputSchema: {
+          turn_token: nativeTurnTokenSchema,
+          wire_name: z.string().min(1).max(1_000),
+          arguments: jsonArgumentsSchema.optional(),
+          input: z.string().max(5_000_000).optional(),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      },
+      async ({ turn_token, wire_name, arguments: args, input }, extra) => withClaimedTurn(
+        "opencode_tool_call", turn_token, extra, claimed => {
+          const matches = safeVisibleTools(claimed.environment, "opencode")
+            .filter(tool => wireName(tool) === wire_name);
+          if (matches.length !== 1) {
+            throw new Error(`OpenCode tool is not uniquely available in this turn: ${wire_name}`);
+          }
+          const tool = matches[0]!;
+          if (tool.freeform) {
+            if (input === undefined) throw new Error(`Freeform OpenCode tool ${wire_name} requires input`);
+            if (args && Object.keys(args).length > 0) throw new Error(`Freeform OpenCode tool ${wire_name} does not accept arguments`);
+            return invoke(claimed.bindingId, claimed.environment, tool, { input }, extra.signal);
+          }
+          if (input !== undefined) throw new Error(`Function OpenCode tool ${wire_name} does not accept freeform input`);
+          const invocationArguments = args ?? {};
+          assertBrowserToolArguments(tool, invocationArguments);
+          return invoke(claimed.bindingId, claimed.environment, tool, { arguments: invocationArguments }, extra.signal);
+        },
+      ),
+    );
+    await server.connect(observeMcpToolCalls(new StdioServerTransport(), BRIDGE_TOOL_NAMES));
+    return;
+  }
+
   server.registerTool(
     "codex_exec",
     {
-      title: "Run a native Codex command",
-      description: afterSafeStart(contract, "Invoke the command tool advertised by the current outer Codex harness. A long-running command returns its native session_id."),
+      title: "Run a native OpenCode command",
+      description: afterSafeStart(contract, "Invoke the command tool advertised by the current outer OpenCode harness. A long-running command returns its native session_id."),
       inputSchema: {
         ...turnReferenceInput(contract),
         cmd: z.string().min(1).max(100_000),
@@ -671,11 +758,11 @@ export async function runChatGptMcpServer(options: {
         max_output_tokens: z.number().int().min(1).max(1_000_000).optional(),
         tty: z.boolean().optional(),
         sandbox_permissions: z.enum(["use_default", "require_escalated"]).optional()
-          .describe("Native Codex sandbox request, only when the current command tool supports it. Codex decides whether to approve."),
+          .describe("Native OpenCode sandbox request, only when the current command tool supports it. OpenCode decides whether to approve."),
         justification: z.string().optional()
           .describe("Approval question for a native require_escalated request; omit otherwise."),
         prefix_rule: z.array(z.string()).optional()
-          .describe("Optional native approval prefix for require_escalated; Codex owns its approval and persistence."),
+          .describe("Optional native approval prefix for require_escalated; OpenCode owns its approval and persistence."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
@@ -719,7 +806,7 @@ export async function runChatGptMcpServer(options: {
         }
         const gateway = execGateway(bound);
         if (!gateway) {
-          throw new Error("This Codex turn did not advertise a native command tool or the native exec gateway");
+          throw new Error("This OpenCode turn did not advertise a native command tool or the native exec gateway");
         }
         return invoke(claimed.bindingId, bound, gateway, {
           input: execCommandGatewayProgram(execCommandArguments, shellCommandArguments),
@@ -731,7 +818,7 @@ export async function runChatGptMcpServer(options: {
   server.registerTool(
     "codex_write_stdin",
     {
-      title: "Continue a native Codex command session",
+      title: "Continue a native OpenCode command session",
       description: afterSafeStart(contract, `Write characters to, or poll, a session_id returned by codex_exec. ${COMMAND_POLL_TRANSPORT_RULE}`),
       inputSchema: {
         ...turnReferenceInput(contract),
@@ -766,8 +853,8 @@ export async function runChatGptMcpServer(options: {
   server.registerTool(
     "codex_apply_patch",
     {
-      title: "Apply a native Codex patch",
-      description: afterSafeStart(contract, "Invoke the outer Codex apply_patch tool, producing a native file-change item in the Codex task."),
+      title: "Apply a native OpenCode patch",
+      description: afterSafeStart(contract, "Invoke the outer OpenCode apply_patch tool, producing a native file-change item in the OpenCode task."),
       inputSchema: { ...turnReferenceInput(contract), patch: z.string().min(1).max(5_000_000) },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
@@ -790,8 +877,8 @@ export async function runChatGptMcpServer(options: {
   server.registerTool(
     "codex_view_image",
     {
-      title: "View an image through native Codex",
-      description: afterSafeStart(contract, "Invoke the outer Codex view_image tool and return its multimodal result to this same ChatGPT response."),
+      title: "View an image through native OpenCode",
+      description: afterSafeStart(contract, "Invoke the outer OpenCode view_image tool and return its multimodal result to this same ChatGPT response."),
       inputSchema: {
         ...turnReferenceInput(contract),
         path: z.string().min(1).max(16_384),
@@ -818,10 +905,10 @@ export async function runChatGptMcpServer(options: {
   server.registerTool(
     "codex_tool_inventory",
     {
-      title: "Discover tools from the current Codex harness",
+      title: "Discover tools from the current OpenCode harness",
       description: contract === "safe"
         ? "List tools available to the connected Zero Risk request, including configured MCP and app tools."
-        : "Search the exact tool registry supplied to the current outer Codex turn, including configured MCP/app tools.",
+        : "Search the exact tool registry supplied to the current outer OpenCode turn, including configured MCP/app tools.",
       inputSchema: {
         ...turnReferenceInput(contract),
         query: z.string().max(500).optional(),
@@ -918,12 +1005,12 @@ export async function runChatGptMcpServer(options: {
   server.registerTool(
     "codex_tool_call",
     {
-      title: "Call any tool from the current Codex harness",
+      title: "Call any tool from the current OpenCode harness",
       description: afterSafeStart(contract, [
-        "Invoke an exact wire_name returned by codex_tool_inventory. The outer Codex runtime performs the call, approvals, and UI lifecycle.",
+        "Invoke an exact wire_name returned by codex_tool_inventory. The outer OpenCode runtime performs the call, approvals, and UI lifecycle.",
         ...(contract === "native" ? [
           `A pending context-compaction request can also provide the reserved ${CODEX_COMPACTION_CONTROL_WIRE_NAME} operation, which is not listed by inventory.`,
-          "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending Codex task; it does not execute commands, access files, or invoke other tools.",
+          "Use only that request's issued control token and arguments {handoff_id, summary}. This operation submits the conversation summary to the pending OpenCode task; it does not execute commands, access files, or invoke other tools.",
         ] : []),
       ].join(" ")),
       inputSchema: {
@@ -965,10 +1052,10 @@ export async function runChatGptMcpServer(options: {
           const gateway = execGateway(bound);
           const hiddenOuterTool = bound.tools.some(candidate => wireName(candidate) === wire_name);
           if (!gateway || hiddenOuterTool || !gatewayToolNameIsValid(wire_name)) {
-            throw new Error(`Codex tool is not available in this turn: ${wire_name}`);
+            throw new Error(`OpenCode tool is not available in this turn: ${wire_name}`);
           }
           if (input !== undefined && args && Object.keys(args).length > 0) {
-            throw new Error(`Codex nested tool ${wire_name} accepts either arguments or freeform input, not both`);
+            throw new Error(`OpenCode nested tool ${wire_name} accepts either arguments or freeform input, not both`);
           }
           if (wire_name === "write_stdin" && input !== undefined) {
             throw new Error("ChatGPT Web write_stdin requires structured arguments. " + COMMAND_POLL_TRANSPORT_RULE);
@@ -985,13 +1072,13 @@ export async function runChatGptMcpServer(options: {
           }, extra.signal);
         }
         if (tool.freeform) {
-          if (input === undefined) throw new Error(`Freeform Codex tool ${wire_name} requires input`);
-          if (args && Object.keys(args).length > 0) throw new Error(`Freeform Codex tool ${wire_name} does not accept arguments`);
+          if (input === undefined) throw new Error(`Freeform OpenCode tool ${wire_name} requires input`);
+          if (args && Object.keys(args).length > 0) throw new Error(`Freeform OpenCode tool ${wire_name} does not accept arguments`);
           return invoke(claimed.bindingId, bound, tool, {
             input: tool === execGateway(bound) ? transportBoundRawExecProgram(input, wireName(tool)) : input,
           }, extra.signal);
         }
-        if (input !== undefined) throw new Error(`Function Codex tool ${wire_name} does not accept freeform input`);
+        if (input !== undefined) throw new Error(`Function OpenCode tool ${wire_name} does not accept freeform input`);
         const invocationArguments = args ?? {};
         assertBrowserToolArguments(tool, invocationArguments);
         return invoke(claimed.bindingId, bound, tool, { arguments: invocationArguments }, extra.signal);
@@ -1003,8 +1090,8 @@ export async function runChatGptMcpServer(options: {
     server.registerTool(
       "codex_turn_complete",
       {
-        title: "Return the result to Codex",
-        description: "Send the complete answer back to the connected Codex request after its work is finished. For compaction, send the requested compacted summary.",
+        title: "Return the result to OpenCode",
+        description: "Send the complete answer back to the connected OpenCode request after its work is finished. For compaction, send the requested compacted summary.",
         inputSchema: {
           request_id: turnTokenSchema,
           final_answer: z.string().min(1).max(5_000_000),

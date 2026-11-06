@@ -30,7 +30,7 @@ export async function runCancellationSmoke(command: string[], limits = {
     timeout: 15_000,
   });
   if (bundled.status !== 0) {
-    throw new Error(`Could not read bundled Codex models: ${bundled.error?.message || bundled.stderr}`);
+    throw new Error(`Could not read bundled OpenCode models: ${bundled.error?.message || bundled.stderr}`);
   }
 
   const config = defaultConfig("browser-only");
@@ -50,7 +50,7 @@ export async function runCancellationSmoke(command: string[], limits = {
     async function* cancelledStream(): AsyncGenerator<AdapterEvent> {
       yield {
         type: "error",
-        message: "The ChatGPT browser tab was closed, so the Codex turn was cancelled.",
+        message: "The ChatGPT browser tab was closed, so the OpenCode turn was cancelled.",
         status: 499,
         errorType: "client_closed_request",
         code: "client_cancelled",
@@ -82,7 +82,7 @@ export async function runCancellationSmoke(command: string[], limits = {
           error: {
             type: "client_closed_request",
             code: "client_cancelled",
-            message: "The ChatGPT browser tab was closed, so the Codex turn was cancelled.",
+            message: "The ChatGPT browser tab was closed, so the OpenCode turn was cancelled.",
           },
         }, { status: 400 });
       },
@@ -128,23 +128,23 @@ export async function runCancellationSmoke(command: string[], limits = {
     await within(Promise.race([
       cancellationSent.promise,
       exited.then(() => {
-        if (cancellationAt === undefined) throw new Error("Codex exited before receiving cancellation");
+        if (cancellationAt === undefined) throw new Error("OpenCode exited before receiving cancellation");
       }),
-    ]), limits.startupMs, "Codex startup did not reach provider cancellation");
+    ]), limits.startupMs, "OpenCode startup did not reach provider cancellation");
     const remaining = limits.cancellationMs - (performance.now() - cancellationAt!);
-    const exit = await within(exited, remaining, "Codex cancellation did not terminate within the smoke deadline");
+    const exit = await within(exited, remaining, "OpenCode cancellation did not terminate within the smoke deadline");
     if (exit.at - cancellationAt! >= limits.cancellationMs) {
-      throw new Error("Codex cancellation did not terminate within the smoke deadline");
+      throw new Error("OpenCode cancellation did not terminate within the smoke deadline");
     }
     const exitCode = exit.code;
-    const [stdout, stderr] = await within(output, limits.outputMs, "Codex output pipes did not close after exit");
+    const [stdout, stderr] = await within(output, limits.outputMs, "OpenCode output pipes did not close after exit");
 
-    if (exitCode === 0) throw new Error(`Codex reported cancellation as success:\n${stdout}`);
+    if (exitCode === 0) throw new Error(`OpenCode reported cancellation as success:\n${stdout}`);
     if (responseRequests !== 2) {
-      throw new Error(`Codex made ${responseRequests} Responses requests; expected one streamed failure and one terminal replay`);
+      throw new Error(`OpenCode made ${responseRequests} Responses requests; expected one streamed failure and one terminal replay`);
     }
     if (!`${stdout}\n${stderr}`.includes("client_cancelled")) {
-      throw new Error(`Codex did not surface the terminal cancellation body:\n${stdout}\n${stderr}`);
+      throw new Error(`OpenCode did not surface the terminal cancellation body:\n${stdout}\n${stderr}`);
     }
     process.stdout.write("NATIVE_CODEX_BROWSER_TAB_CANCEL_SMOKE_OK\n");
   } finally {
@@ -165,6 +165,6 @@ export async function runCancellationSmoke(command: string[], limits = {
 
 if (import.meta.main) {
   const codex = resolve(process.argv[2] ?? "/Applications/ChatGPT.app/Contents/Resources/codex");
-  if (!existsSync(codex)) throw new Error(`Codex executable is missing: ${codex}`);
+  if (!existsSync(codex)) throw new Error(`OpenCode executable is missing: ${codex}`);
   await runCancellationSmoke([codex]);
 }

@@ -13,7 +13,7 @@ export function nativeProxyFromPac(value: unknown): string | undefined {
   if (first === "DIRECT") return undefined;
   const match = /^(PROXY|HTTPS) ([^\s/;]+)$/.exec(first);
   if (!match) {
-    throw proxyError("Native Codex requires an HTTP(S) system proxy; the selected proxy protocol is unsupported");
+    throw proxyError("Native OpenCode requires an HTTP(S) system proxy; the selected proxy protocol is unsupported");
   }
   try {
     const proxy = new URL(`${match[1] === "HTTPS" ? "https" : "http"}://${match[2]}`);

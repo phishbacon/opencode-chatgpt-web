@@ -1,3 +1,4 @@
+import { PRODUCT_NAME } from "./../src/branding";
 import { expect, spyOn, test } from "bun:test";
 import * as childProcess from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -11,7 +12,7 @@ import {
   resolveDevProfilePaths,
 } from "../src/dev-chat/profile";
 
-test("DEV profile paths isolate browser, Codex, config, chat, and runtime state", () => {
+test("DEV profile paths isolate browser, OpenCode, config, chat, and runtime state", () => {
   const homeDirectory = "/Users/tester";
   const devHome = resolve(homeDirectory, "development");
   const paths = resolveDevProfilePaths({
@@ -74,8 +75,8 @@ test("installed launcher discovery has explicit platform candidates", () => {
     homeDirectory: "/Users/tester",
     environment: {},
   })).toEqual([
-    "/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
-    "/Users/tester/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT",
+    `/Applications/${PRODUCT_NAME}.app/Contents/MacOS/${PRODUCT_NAME}`,
+    `/Users/tester/Applications/${PRODUCT_NAME}.app/Contents/MacOS/${PRODUCT_NAME}`,
   ]);
   expect(installedLauncherCandidates({
     platform: "linux",
@@ -91,36 +92,36 @@ test("installed launcher discovery has explicit platform candidates", () => {
     homeDirectory: "C:\\Users\\tester",
     environment: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
   })).toEqual([
-    "C:\\Users\\tester\\AppData\\Local\\Programs\\Codex Web GPT\\Codex Web GPT.exe",
+    `C:\\Users\\tester\\AppData\\Local\\Programs\\${PRODUCT_NAME}\\${PRODUCT_NAME}.exe`,
   ]);
   expect(installedLauncherCandidates({
     platform: "win32",
     homeDirectory: "C:\\Users\\tester",
     environment: { LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local" },
-    windowsInstallLocation: "D:\\Apps\\Codex Web GPT",
+    windowsInstallLocation: `D:\\Apps\\${PRODUCT_NAME}`,
   })).toEqual([
-    "D:\\Apps\\Codex Web GPT\\Codex Web GPT.exe",
+    `D:\\Apps\\${PRODUCT_NAME}\\${PRODUCT_NAME}.exe`,
   ]);
 });
 
 test("injected Windows discovery avoids the live registry while ordinary discovery still uses it", () => {
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
   const registry = spyOn(childProcess, "execFileSync").mockImplementation((() =>
-    "    InstallLocation    REG_SZ    D:\\Installed\\Codex Web GPT\n"
+    `    InstallLocation    REG_SZ    D:\\Installed\\${PRODUCT_NAME}\n`
   ) as unknown as typeof childProcess.execFileSync);
   Object.defineProperty(process, "platform", { ...platform, value: "win32" });
   try {
     expect(installedLauncherCandidates({
       platform: "win32",
       environment: { LOCALAPPDATA: "C:\\Fixture\\AppData\\Local" },
-    })).toEqual(["C:\\Fixture\\AppData\\Local\\Programs\\Codex Web GPT\\Codex Web GPT.exe"]);
+    })).toEqual([`C:\\Fixture\\AppData\\Local\\Programs\\${PRODUCT_NAME}\\${PRODUCT_NAME}.exe`]);
     expect(registry).not.toHaveBeenCalled();
     expect(installedLauncherCandidates({ platform: "win32", environment: process.env }))
-      .toEqual(["D:\\Installed\\Codex Web GPT\\Codex Web GPT.exe"]);
+      .toEqual([`D:\\Installed\\${PRODUCT_NAME}\\${PRODUCT_NAME}.exe`]);
     expect(registry).toHaveBeenCalledTimes(1);
     expect(installedLauncherCandidates({
       platform: "win32", environment: {}, windowsInstallLocation: "E:\\Explicit",
-    })).toEqual(["E:\\Explicit\\Codex Web GPT.exe"]);
+    })).toEqual([`E:\\Explicit\\${PRODUCT_NAME}.exe`]);
     expect(registry).toHaveBeenCalledTimes(1);
   } finally {
     Object.defineProperty(process, "platform", platform);
@@ -148,7 +149,7 @@ test("DEV launcher child cannot inherit production home or browser-profile overr
   });
 });
 
-test("DEV chat activation removes shared production Codex homes", () => {
+test("DEV chat activation removes shared production OpenCode homes", () => {
   const keys = ["CODEX_WEB_GPT_DEV_HOME", "CODEX_CHATGPT_WEB_HOME", "CODEX_HOME", "CODEX_CHATGPT_WEB_TRUSTED_CODEX_HOMES"];
   const saved = keys.map(key => process.env[key]);
   try {

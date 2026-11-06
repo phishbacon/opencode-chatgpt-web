@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { AdapterEvent, CodexParsedRequest } from "../../types";
+import type { OpenCodeTurnOwner } from "../../opencode/turn-binding";
 import type { BrokerToolRequest } from "./turn-broker";
-import { ChatGptWebAdapterError, chatGptBrowserTabClosedError, chatGptTurnSupersededError } from "./adapter-error";
+import { ChatGptWebAdapterError, chatGptBrowserTabClosedError, chatGptOpenCodeCompactionRetiredError, chatGptTurnSupersededError } from "./adapter-error";
 import {
   chatGptTurnUserRevisionHistory,
   extractChatGptCompactionSourceRevision,
@@ -186,18 +187,24 @@ function executionKey(parsed: CodexParsedRequest, payload: unknown): string {
 function compactionInputRevision(parsed: CodexParsedRequest): unknown[] {
   const body = parsed._rawBody;
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("ChatGPT web compaction requires the complete native Codex request body");
+    throw new Error("ChatGPT web compaction requires the complete native OpenCode request body");
   }
   const input = (body as { input?: unknown }).input;
   if (!Array.isArray(input)) {
-    throw new Error("ChatGPT web compaction requires the complete native Codex input history");
+    throw new Error("ChatGPT web compaction requires the complete native OpenCode input history");
   }
   return input;
 }
 
 export function chatGptTurnExecutionKey(parsed: CodexParsedRequest): string {
+  if (parsed._openCodeTurn) {
+    const { sessionID, messageID, turnNonce, owner, compactionEpoch } = parsed._openCodeTurn;
+    // Codex rollover has native execution revisions; OpenCode's signed epoch
+    // separates an in-flight pre-compaction execution from its replacement.
+    return executionKey(parsed, { kind: "opencode", sessionID, messageID, turnNonce, owner, compactionEpoch });
+  }
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  if (!identity.turnId) throw new Error("ChatGPT web requires native OpenCode turn_id metadata for browser-session replay");
   return executionKey(parsed, {
     threadId: identity.threadId,
     turnId: identity.turnId,
@@ -215,6 +222,13 @@ export interface ChatGptInstructionLineage {
 }
 
 export function chatGptInstructionLineage(parsed: CodexParsedRequest): ChatGptInstructionLineage {
+  if (parsed._openCodeTurn) {
+    // A prompt's signed messageID is its instruction revision; later native
+    // tool-result rounds retain this identity without claiming Codex lineage.
+    const { sessionID, messageID, turnNonce } = parsed._openCodeTurn;
+    const current = createHash("sha256").update(JSON.stringify(["opencode", sessionID, messageID, turnNonce])).digest("hex");
+    return { current, predecessors: new Set() };
+  }
   const revisions = chatGptTurnUserRevisionHistory(parsed).map(revision => createHash("sha256")
     .update(JSON.stringify([revision.itemId ?? null, revision.content])).digest("hex"));
   const current = revisions.pop();
@@ -224,12 +238,19 @@ export function chatGptInstructionLineage(parsed: CodexParsedRequest): ChatGptIn
 
 /** Exact canonical Responses request identity inside one long-lived browser execution. */
 export function chatGptTurnRoundKey(parsed: CodexParsedRequest): string {
+  if (parsed._openCodeTurn) {
+    const raw = parsed._rawBody as { input?: unknown } | undefined;
+    if (!raw || (typeof raw.input !== "string" && !Array.isArray(raw.input))) {
+      throw new Error("OpenCode browser round requires canonical native Responses input");
+    }
+    return executionKey(parsed, { kind: "opencode", turn: chatGptTurnExecutionKey(parsed), input: raw.input });
+  }
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for round replay");
+  if (!identity.turnId) throw new Error("ChatGPT web requires native OpenCode turn_id metadata for round replay");
   const body = parsed._rawBody;
   if (!body || typeof body !== "object" || Array.isArray(body)
     || !Array.isArray((body as { input?: unknown }).input)) {
-    throw new Error("ChatGPT web requires the complete native Codex input for round replay");
+    throw new Error("ChatGPT web requires the complete native OpenCode input for round replay");
   }
   return executionKey(parsed, {
     threadId: identity.threadId,
@@ -241,8 +262,11 @@ export function chatGptTurnRoundKey(parsed: CodexParsedRequest): string {
 
 /** Stable identity for limiting automatic retries of one native Codex turn. */
 export function chatGptTurnRetryKey(parsed: CodexParsedRequest): string {
+  if (parsed._openCodeTurn) {
+    return createHash("sha256").update(JSON.stringify(["opencode", chatGptTurnExecutionKey(parsed)])).digest("hex");
+  }
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-turn retry budgeting");
+  if (!identity.turnId) throw new Error("ChatGPT web requires native OpenCode turn_id metadata for browser-turn retry budgeting");
   return createHash("sha256").update(JSON.stringify({
     threadId: identity.threadId,
     turnId: identity.turnId,
@@ -252,6 +276,10 @@ export function chatGptTurnRetryKey(parsed: CodexParsedRequest): string {
 
 /** One native Codex thread may own at most one live ChatGPT browser surface. */
 export function chatGptThreadOwnershipKey(parsed: CodexParsedRequest): string {
+  if (parsed._openCodeTurn) {
+    const { sessionID, owner } = parsed._openCodeTurn;
+    return createHash("sha256").update(JSON.stringify(["opencode", sessionID, owner])).digest("hex");
+  }
   const identity = extractChatGptTurnIdentity(parsed);
   const owner = identity.threadId
     ? { kind: "thread", id: identity.threadId }
@@ -260,14 +288,14 @@ export function chatGptThreadOwnershipKey(parsed: CodexParsedRequest): string {
       : identity.turnId
         ? { kind: "turn", id: identity.turnId }
         : undefined;
-  if (!owner) throw new Error("ChatGPT web requires native Codex turn identity metadata for browser ownership");
+  if (!owner) throw new Error("ChatGPT web requires native OpenCode turn identity metadata for browser ownership");
   return createHash("sha256").update(JSON.stringify(owner)).digest("hex");
 }
 
 /** Locate the browser response that a native mid-turn compaction replaces. */
 export function chatGptCompactionSourceExecutionKey(parsed: CodexParsedRequest): string {
   const identity = extractChatGptTurnIdentity(parsed);
-  if (!identity.turnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser-session replay");
+  if (!identity.turnId) throw new Error("ChatGPT web requires native OpenCode turn_id metadata for browser-session replay");
   const source = extractChatGptCompactionSourceRevision(parsed);
   return executionKey(parsed, {
     threadId: identity.threadId,
@@ -629,6 +657,112 @@ export class ChatGptTurnSessions {
   }
 
   /**
+   * Codex retires a retained browser epoch during its native compaction handoff.
+   * OpenCode reports compaction through its signed provider turn instead. Only
+   * the already authenticated OpenCode route calls this with the current owner
+   * and epoch, after checking canonical native tool-result history. Let the old
+   * browser and its observers finish before releasing its retained tab.
+   */
+  async retireEarlierOpenCodeEpochsAndWait(
+    ownerKey: string,
+    sessionID: string,
+    currentEpoch: number,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    if (!Number.isSafeInteger(currentEpoch) || currentEpoch < 0) {
+      throw new Error("OpenCode browser retirement requires a valid signed compaction epoch");
+    }
+    const obsolete = new Map<string, ChatGptTurnSession[]>();
+    for (const session of this.entries.values()) {
+      if (session.ownerKey !== ownerKey || session.nativeThreadId !== sessionID) continue;
+      const previousEpoch = session.runtime.usageInput?._openCodeTurn?.compactionEpoch;
+      const key = session.conversationKey();
+      if (previousEpoch === undefined || !key) continue;
+      if (previousEpoch > currentEpoch) {
+        throw new Error("OpenCode browser retirement cannot roll back a newer compaction epoch");
+      }
+      if (previousEpoch === currentEpoch) continue;
+      const matches = obsolete.get(key) ?? [];
+      matches.push(session);
+      obsolete.set(key, matches);
+    }
+    let retired = 0;
+    for (const [key, sessions] of obsolete) {
+      // A completed browser response can still have a native observer draining
+      // its last events. Avoid cancelling a turn that has not committed its final
+      // answer, and never close another OpenCode session's retained conversation.
+      await awaitWithAbort(Promise.all(sessions.map(async session => {
+        await session.browserOutcome;
+        await session.physicalSettlement;
+        await session.runExclusive(async () => {});
+      })), signal);
+      retired += await awaitWithAbort(this.retireConversationAndWait(key), signal);
+    }
+    return retired;
+  }
+
+  /**
+   * OpenCode's auto-compaction summary is requested while the originating turn
+   * still holds this session's browser, waiting on a tool result that only
+   * compaction can release. That pre-compaction browser work is abandoned: its
+   * tool result already exists in canonical OpenCode history, and the resumed
+   * turn rebuilds from the compacted context. Retire it instead of queueing
+   * behind a turn which cannot finish.
+   */
+  async retireOpenCodeSessionAndWait(ownerKey: string, sessionID: string, signal?: AbortSignal): Promise<number> {
+    const matches = [...this.entries].filter(([, session]) => (
+      session.ownerKey === ownerKey && session.nativeThreadId === sessionID
+    ));
+    let retired = 0;
+    for (const [key, session] of matches) {
+      if (this.entries.get(key) !== session) continue;
+      this.entries.delete(key);
+      this.forgetConversationHead(session);
+      await awaitWithAbort(this.beginRetirement(key, session, chatGptOpenCodeCompactionRetiredError()), signal);
+      retired += 1;
+    }
+    return retired;
+  }
+
+  /**
+   * Codex releases its retained browser when its native session is closed.
+   * OpenCode's signed deletion notice must retire only that session's matching
+   * browser ownership, including completed tabs still retained by Electron.
+   */
+  async retireDeletedOpenCodeSessionAndWait(sessionID: string, owner: OpenCodeTurnOwner): Promise<number> {
+    const owned = [...this.entries].filter(([, session]) => {
+      const bound = session.runtime.usageInput?._openCodeTurn;
+      return session.nativeThreadId === sessionID
+        && bound?.sessionID === sessionID
+        && bound.owner.cwd === owner.cwd
+        && bound.owner.projectID === owner.projectID
+        && bound.owner.agent === owner.agent;
+    });
+    const conversations = new Set(owned.map(([, session]) => session.conversationKey())
+      .filter((key): key is string => !!key));
+    for (const conversationKey of conversations) {
+      if ([...this.entries.values()].some(session => session.conversationKey() === conversationKey
+        && !owned.some(([, ownedSession]) => session === ownedSession))) {
+        throw new Error("OpenCode retained browser conversation contains another session owner");
+      }
+    }
+    // The Codex conversation retirement detaches each tab synchronously.
+    // Snapshot ungrouped OpenCode turns before that detach, or the same turn
+    // is counted and retired again as a newly ungrouped session.
+    const ungrouped = owned.filter(([, session]) => !session.conversationKey());
+    // Each retirement detaches ownership synchronously before its first await.
+    const retirements = [...conversations].map(key => this.closeConversationAndWait(key));
+    for (const [key, session] of ungrouped) {
+      if (this.entries.get(key) === session) {
+        this.entries.delete(key);
+        this.forgetConversationHead(session);
+      }
+      retirements.push(this.beginRetirement(key, session).then(() => 1));
+    }
+    return (await Promise.all(retirements)).reduce((sum, count) => sum + count, 0);
+  }
+
+  /**
    * Close the physical retained-chat epoch without discarding a terminal response that won the
    * compaction race before any compaction instruction reached that response. The detached logical
    * session remains addressable by its exact Responses execution key, so the post-compaction
@@ -688,6 +822,22 @@ export class ChatGptTurnSessions {
     const retirement = Promise.all(matches.map(([, session]) => session.physicalSettlement))
       .then(async () => { await release?.(); });
     this.conversationRetirements.set(conversationKey, retirement);
+    // A concurrent replacement of the same OpenCode or Codex owner must wait
+    // for the retained launcher surface to finish closing, not merely for the
+    // preceding HTTP response to settle.
+    for (const ownerKey of new Set(matches.map(([, session]) => session.ownerKey).filter(
+      (owner): owner is string => owner !== undefined,
+    ))) {
+      const previous = this.ownerRetirements.get(ownerKey);
+      const ownerRetirement = previous
+        ? Promise.all([previous, retirement]).then(() => undefined)
+        : retirement;
+      this.ownerRetirements.set(ownerKey, ownerRetirement);
+      void ownerRetirement.then(
+        () => { if (this.ownerRetirements.get(ownerKey) === ownerRetirement) this.ownerRetirements.delete(ownerKey); },
+        () => { if (this.ownerRetirements.get(ownerKey) === ownerRetirement) this.ownerRetirements.delete(ownerKey); },
+      );
+    }
     try {
       await retirement;
     } finally {

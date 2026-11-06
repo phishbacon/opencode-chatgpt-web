@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { isChatGptWebZeroRiskBackendModel } from "../../chatgpt-web-models";
+import type { OpenCodeToolReceiptLedger } from "../../opencode/tool-receipts";
+import { isOpenCodeWebsiteConnectorName, OPENCODE_WEBSITE_CONNECTOR_NAME } from "../../opencode/website-connector";
 import { defaultBrokerEndpoint, expandUserPath, resolveBrokerEndpoint } from "../../config";
 import {
   cancelLauncherManualTurn,
@@ -27,7 +29,7 @@ import { CHATGPT_WEB_LUNA_MODEL_ID, resolveChatGptWebModelMode, type ChatGptWebC
 import { chatGptReadOnlyContextWarning, compileChatGptWebPrompt } from "./prompt";
 import { createChatGptStructuredOutputValidator } from "./output-validation";
 import { chatGptWebTurnRetryPolicy } from "./retry-policy";
-import { TurnBroker, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
+import { TurnBroker, TurnBrokerTimeoutError, type BrokerToolRequest, type BrokerToolResult, type TurnBrokerOwner } from "./turn-broker";
 import { ChatGptTextFeed, ChatGptTraceFeed, chatGptCompactionSourceExecutionKey, chatGptInstructionLineage, chatGptThreadOwnershipKey, chatGptTurnExecutionKey, chatGptTurnRetryKey, chatGptTurnRoundKey, chatGptTurnSessions, type ChatGptBrowserOutcome, type ChatGptTraceEvent, type ChatGptTurnRuntime, type ChatGptTurnSession } from "./turn-execution";
 import { estimateChatGptWebUsage, resolveBiggerContextMultipartParts } from "./usage";
 import { ChatGptThreadEnvironmentStore } from "./thread-environment";
@@ -72,7 +74,7 @@ function abortError(signal?: AbortSignal): Error {
 
 class ChatGptObserverDisconnected extends DOMException {
   constructor(readonly cause: unknown) {
-    super("The Codex response stream disconnected", "AbortError");
+    super("The OpenCode response stream disconnected", "AbortError");
   }
 }
 
@@ -236,7 +238,7 @@ function brokerContent(content: string | CodexContentPart[]): unknown[] {
     if (part.type === "text") return { type: "text", text: part.text };
     const parsed = parseDataUrl(part.imageUrl);
     if (parsed) return { type: "image", data: parsed.base64, mimeType: parsed.mediaType };
-    return { type: "resource_link", uri: part.imageUrl, name: "Codex tool image", mimeType: "image/*" };
+    return { type: "resource_link", uri: part.imageUrl, name: "OpenCode tool image", mimeType: "image/*" };
   });
 }
 
@@ -251,6 +253,29 @@ function brokerResult(message: CodexToolResultMessage): BrokerToolResult {
     ...(structured !== undefined ? { structuredContent: structured } : {}),
     ...(message.isError ? { isError: true } : {}),
   };
+}
+
+export async function deliverOpenCodeToolResult(
+  broker: TurnBrokerOwner,
+  token: string,
+  callId: string,
+  result: BrokerToolResult,
+): Promise<void> {
+  // Original Codex owner completion is single-shot. OpenCode's canonical native tool output
+  // must survive an ambiguous socket acknowledgment without running a side effect twice.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await broker.completeTool(token, callId, result);
+      return;
+    } catch (error) {
+      const transient = error instanceof TurnBrokerTimeoutError
+        || (error instanceof Error && (
+          error.message.startsWith("ChatGPT web turn broker unavailable:")
+          || error.message === "ChatGPT web turn broker closed the connection"
+        ));
+      if (!transient || attempt === 2) throw error;
+    }
+  }
 }
 
 function emitToolBatch(requests: BrokerToolRequest[], usage: CodexUsage, emit: (event: AdapterEvent) => void): void {
@@ -346,7 +371,7 @@ function currentToolResults(parsed: CodexParsedRequest, session: ChatGptTurnSess
   const byId = new Map<string, CodexToolResultMessage>();
   for (const message of parsed.context.messages) {
     if (message.role !== "toolResult" || !session.hasOutstanding(message.toolCallId)) continue;
-    if (byId.has(message.toolCallId)) throw new Error(`Codex returned duplicate results for tool call ${message.toolCallId}`);
+    if (byId.has(message.toolCallId)) throw new Error(`OpenCode returned duplicate results for tool call ${message.toolCallId}`);
     byId.set(message.toolCallId, message);
   }
   return [...byId.values()];
@@ -356,7 +381,7 @@ function validateBatchTools(parsed: CodexParsedRequest, requests: BrokerToolRequ
   const available = new Set((parsed.context.tools ?? []).map(tool => namespacedToolName(tool.namespace, tool.name)));
   for (const request of requests) {
     if (!available.has(request.wireName)) {
-      throw new Error(`ChatGPT requested a tool that the active Codex round did not advertise: ${request.wireName}`);
+      throw new Error(`ChatGPT requested a tool that the active OpenCode round did not advertise: ${request.wireName}`);
     }
   }
 }
@@ -369,6 +394,8 @@ export function createChatGptWebAdapter(
   dependencies: {
     broker?: TurnBrokerOwner;
     zeroRiskManualControl?: ChatGptZeroRiskManualControl;
+    /** Codex uses native rollout reconciliation; OpenCode needs bridge-owned issuance receipts. */
+    openCodeToolReceipts?: OpenCodeToolReceiptLedger;
   } = {},
 ): ProviderAdapter {
   const worker = ChatGptBrowserWorker.forProvider(provider);
@@ -409,7 +436,7 @@ export function createChatGptWebAdapter(
       : undefined;
   if (manualInteraction) {
     if (!configuredCapabilities.localToolsEnabled) {
-      throw new Error("ChatGPT Zero Risk requires the Full Codex harness");
+      throw new Error("ChatGPT Zero Risk requires the Full OpenCode harness");
     }
     if (!retainedLauncherDescriptor) {
       throw new Error("ChatGPT Zero Risk requires the Launcher browser host");
@@ -426,7 +453,7 @@ export function createChatGptWebAdapter(
       : undefined,
   );
   const currentUsageInput = (parsed: CodexParsedRequest): CodexParsedRequest => (
-    parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && !experimentalBiggerContext && !parsed._compactionRequest
+    parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID && !experimentalBiggerContext && !parsed._compactionRequest && !parsed._openCodeTurn
       ? lunaCheckpointStore.apply(parsed).parsed
       : parsed
   );
@@ -458,6 +485,7 @@ export function createChatGptWebAdapter(
     const captureLunaCheckpoint = parsed.modelId === CHATGPT_WEB_LUNA_MODEL_ID
       && !experimentalBiggerContext
       && !parsed._compactionRequest
+      && !parsed._openCodeTurn
       && Boolean(identity.threadId && identity.turnId);
     const checkpointInput = captureLunaCheckpoint
       ? lunaCheckpointStore.apply(parsed)
@@ -484,7 +512,11 @@ export function createChatGptWebAdapter(
         ? resolveBiggerContextMultipartParts(input, turnCapabilities, experimentalSkillAttachments, worker.appName)
         : undefined;
       return {
-        appName: worker.appName,
+        // Codex uses the configured original connector; OpenCode selects its own website plugin,
+        // whose DEV harness form carries the upstream " DEV" suffix.
+        appName: input._openCodeTurn
+          ? (isOpenCodeWebsiteConnectorName(worker.appName) ? worker.appName : OPENCODE_WEBSITE_CONNECTOR_NAME)
+          : worker.appName,
         includeContextTokenBreakdown: true,
         captureLunaCheckpoint,
         experimentalSkillAttachments,
@@ -535,12 +567,12 @@ export function createChatGptWebAdapter(
         failure => {
           const retirement = failure
             ? chatGptToolTimeoutError(failure.tool, failure.timeoutMs)
-            : new Error("Codex Native retired the turn binding before its tool work completed");
+            : new Error("OpenCode Native retired the turn binding before its tool work completed");
           externalProgress.retire(retirement);
           if (!browserOwnerSettled && !browserAbort.signal.aborted) browserAbort.abort(retirement);
         },
         error => {
-          const failure = new Error("ChatGPT could not observe Codex Native turn retirement", {
+          const failure = new Error("ChatGPT could not observe OpenCode Native turn retirement", {
             cause: error,
           });
           externalProgress.retire(failure);
@@ -564,7 +596,7 @@ export function createChatGptWebAdapter(
       ? { onMultipartStageAcknowledged: (part: number) => hooks.onCompactionProgress?.("multipart_acknowledged", part) }
       : {};
     if (manualRequest) {
-      if (!environment) throw new Error("ChatGPT Zero Risk requires a trusted Codex environment");
+      if (!environment) throw new Error("ChatGPT Zero Risk requires a trusted OpenCode environment");
       if (!retainedLauncherDescriptor) throw new Error("ChatGPT Zero Risk requires the Launcher browser host");
       const token = deferred<string>();
       const externalProgress = new ChatGptExternalTurnProgress();
@@ -657,7 +689,7 @@ export function createChatGptWebAdapter(
             await zeroRiskManualControl.markStarted(retainedLauncherDescriptor, owner);
             if (!parsed._compactionRequest) trace.push({
               kind: "commentary",
-              text: "> **Zero Risk connected**\n>\n> The Zero Risk plugin is connected. ChatGPT is now working through the native Codex harness; progress remains visible in the launcher.",
+              text: "> **Zero Risk connected**\n>\n> The Zero Risk plugin is connected. ChatGPT is now working through the native OpenCode harness; progress remains visible in the launcher.",
             });
             answer = await Promise.race([
               broker.waitForSafeCompletion(activeToken, browserAbort.signal),
@@ -768,7 +800,7 @@ export function createChatGptWebAdapter(
         cancel: browserTurn.cancel,
       };
     }
-    if (!environment) throw new Error("Tool-capable ChatGPT web mode requires a trusted Codex environment");
+    if (!environment) throw new Error("Tool-capable ChatGPT web mode requires a trusted OpenCode environment");
     const token = deferred<string>();
     const externalProgress = new ChatGptExternalTurnProgress();
     let tokenSettled = false;
@@ -903,6 +935,18 @@ export function createChatGptWebAdapter(
         const mode = manualRequest
           ? { localTools: true }
           : resolveChatGptWebModelMode(parsed.modelId, parsed.options.reasoning, turnCapabilities);
+        if (parsed._openCodeTurn) {
+          // Codex reconciles against native rollout history. OpenCode must have the signed
+          // turn and the bridge-owned receipt ledger before website tools can be issued.
+          if (manualRequest || !mode.localTools || !configuredCapabilities.localToolsEnabled
+            || !structuredBroker || !dependencies.openCodeToolReceipts) {
+            emit({
+              type: "error", message: "OpenCode website tool bridge requires automatic Full Harness, a structured broker and signed tool receipts",
+              status: 409, errorType: "invalid_request_error", code: "opencode_broker_unavailable", retryable: false,
+            });
+            return;
+          }
+        }
         const structuredOutputValidator = parsed._compactionRequest
           ? undefined
           : createChatGptStructuredOutputValidator(parsed.options.outputFormat);
@@ -923,7 +967,10 @@ export function createChatGptWebAdapter(
         let environment: ReturnType<typeof extractChatGptTurnEnvironment> | undefined;
         if (mode.localTools) {
           try {
-            environment = environmentStore.resolve(parsed);
+            // Unlike Codex, OpenCode carries owner identity signed by its native V2 hooks.
+            environment = parsed._openCodeTurn
+              ? extractChatGptTurnEnvironment(parsed)
+              : environmentStore.resolve(parsed);
           } catch (error) {
             const identity = extractChatGptTurnIdentity(parsed);
             console.warn(
@@ -1256,9 +1303,32 @@ export function createChatGptWebAdapter(
         }
         const executionKey = `${executionNamespace}:${chatGptTurnExecutionKey(parsed)}`;
         const ownerKey = `${executionNamespace}:${chatGptThreadOwnershipKey(parsed)}`;
+        if (parsed._openCodeTurn) {
+          if (parsed._openCodeTurn.purpose === "compaction") {
+            // The summary request arrives while the originating turn still holds
+            // this browser, waiting on a tool result only compaction can release.
+            // That tool result is already canonical OpenCode history, so retire the
+            // pre-compaction browser instead of queueing behind a turn that cannot
+            // finish; the resumed turn rebuilds from the compacted context.
+            await chatGptTurnSessions.retireOpenCodeSessionAndWait(
+              ownerKey,
+              parsed._openCodeTurn.sessionID,
+              incoming.abortSignal,
+            );
+          }
+          // The OpenCode bridge has already accepted a signed compaction epoch
+          // and reconciled its native tool receipts. Codex instead closes its
+          // retained browser as part of the explicit compaction handoff.
+          await chatGptTurnSessions.retireEarlierOpenCodeEpochsAndWait(
+            ownerKey,
+            parsed._openCodeTurn.sessionID,
+            parsed._openCodeTurn.compactionEpoch,
+            incoming.abortSignal,
+          );
+        }
         const nativeIdentity = extractChatGptTurnIdentity(parsed);
-        const nativeTurnId = nativeIdentity.turnId;
-        if (!nativeTurnId) throw new Error("ChatGPT web requires native Codex turn_id metadata for browser ownership");
+        const nativeTurnId = parsed._openCodeTurn?.messageID ?? nativeIdentity.turnId;
+        if (!nativeTurnId) throw new Error("ChatGPT web requires native OpenCode turn_id metadata for browser ownership");
         const abortedTurnIds = manualRequest ? new Set(priorChatGptAbortedTurnIds(parsed)) : undefined;
         if (abortedTurnIds?.size) {
           chatGptTurnSessions.retireAbortedOwnerTurns(ownerKey, abortedTurnIds, executionKey);
@@ -1271,7 +1341,7 @@ export function createChatGptWebAdapter(
           traceId,
           incoming.abortSignal,
           nativeTurnId,
-          nativeIdentity.threadId,
+          parsed._openCodeTurn?.sessionID ?? nativeIdentity.threadId,
           chatGptInstructionLineage(parsed),
         );
         const roundKey = chatGptTurnRoundKey(parsed);
@@ -1368,10 +1438,15 @@ export function createChatGptWebAdapter(
                   return;
                 }
                 if (results.length !== outstanding.length) {
-                  throw new Error(`Codex returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
+                  throw new Error(`OpenCode returned ${results.length} of ${outstanding.length} results for a parallel ChatGPT tool batch`);
                 }
                 for (const message of results) {
-                  await broker.completeTool(turnToken, message.toolCallId, brokerResult(message));
+                  const result = brokerResult(message);
+                  if (parsed._openCodeTurn) {
+                    await deliverOpenCodeToolResult(broker, turnToken, message.toolCallId, result);
+                  } else {
+                    await broker.completeTool(turnToken, message.toolCallId, result);
+                  }
                   session.runtime.externalProgress.recordToolResult();
                   session.runtime.trace.recordProgress();
                   session.markResultDelivered(message.toolCallId);
@@ -1504,6 +1579,21 @@ export function createChatGptWebAdapter(
                   return;
                 }
                 validateBatchTools(parsed, next.requests);
+                if (parsed._openCodeTurn) {
+                  // Register only broker-delivered requests. The matching native OpenCode
+                  // function_call_output must prove these exact IDs, names and arguments.
+                  dependencies.openCodeToolReceipts!.issueBatch(
+                    parsed._openCodeTurn,
+                    (parsed._rawBody as { tools?: unknown } | undefined)?.tools,
+                    next.requests.map(request => ({
+                      callId: request.callId,
+                      name: request.wireName,
+                      arguments: request.freeform
+                        ? JSON.stringify({ input: request.input ?? "" })
+                        : JSON.stringify(request.arguments ?? {}),
+                    })),
+                  );
+                }
                 session.setOutstanding(next.requests, roundReasoning, session.roundEvents(roundKey));
                 emitRoundBatch(buffer => emitToolBatch(
                   next.requests,

@@ -1,3 +1,4 @@
+const { PRODUCT_NAME } = require("../electron/branding.cjs");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -20,7 +21,7 @@ const {
 test("Linux auto-update fails closed without the stable installer wrapper", () => {
   const previousAppImage = process.env.CODEX_WEB_GPT_APPIMAGE;
   const previousWrapper = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
-  process.env.CODEX_WEB_GPT_APPIMAGE = "/opt/codex/Codex Web GPT.AppImage";
+  process.env.CODEX_WEB_GPT_APPIMAGE = `/opt/codex/${PRODUCT_NAME}.AppImage`;
   delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
   try {
     assert.throws(() => buildJob({
@@ -119,10 +120,10 @@ test("checksums and release URLs bind the exact expected asset", () => {
 
 test("macOS bundle resolution never guesses outside Contents/MacOS", () => {
   assert.equal(
-    macApplicationPath("/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT"),
-    "/Applications/Codex Web GPT.app",
+    macApplicationPath(`/Applications/${PRODUCT_NAME}.app/Contents/MacOS/${PRODUCT_NAME}`),
+    `/Applications/${PRODUCT_NAME}.app`,
   );
-  assert.throws(() => macApplicationPath("/tmp/Codex Web GPT"), /Could not resolve/);
+  assert.throws(() => macApplicationPath(`/tmp/${PRODUCT_NAME}`), /Could not resolve/);
 });
 
 test("startup check runs once and exposes only a newer complete release", async () => {
@@ -241,7 +242,7 @@ test("preview and draft releases stay hidden until promoted, regardless of the v
 for (const arch of ["x64", "arm64"]) {
   test(`verified Linux ${arch} update is handed to one detached worker`, async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "launcher-update-test-"));
-    const oldAppImage = path.join(root, "versions", "1.1.4", "Codex Web GPT.AppImage");
+    const oldAppImage = path.join(root, "versions", "1.1.4", `${PRODUCT_NAME}.AppImage`);
     const wrapper = path.join(root, "bin", "codex-web-gpt");
     fs.mkdirSync(path.dirname(oldAppImage), { recursive: true });
     fs.mkdirSync(path.dirname(wrapper), { recursive: true });
@@ -314,8 +315,8 @@ test("detached worker replaces an installed Linux AppImage and removes the old v
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "launcher-worker-test-"));
   const jobRoot = path.join(root, "job");
   const versionsRoot = path.join(root, "versions");
-  const oldTarget = path.join(versionsRoot, "1.1.4", "Codex Web GPT.AppImage");
-  const newTarget = path.join(versionsRoot, "1.2.0", "Codex Web GPT.AppImage");
+  const oldTarget = path.join(versionsRoot, "1.1.4", `${PRODUCT_NAME}.AppImage`);
+  const newTarget = path.join(versionsRoot, "1.2.0", `${PRODUCT_NAME}.AppImage`);
   const wrapper = path.join(root, "bin", "codex-web-gpt");
   const marker = path.join(root, "launched");
   const source = path.join(jobRoot, "update.AppImage");
@@ -348,7 +349,7 @@ test("detached worker replaces an installed Linux AppImage and removes the old v
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.existsSync(newTarget), true);
     assert.equal(fs.existsSync(path.dirname(oldTarget)), false);
-    assert.match(fs.readFileSync(wrapper, "utf8"), /versions\/1\.2\.0\/Codex Web GPT\.AppImage/);
+    assert.match(fs.readFileSync(wrapper, "utf8"), /versions\/1\.2\.0\/OpenCode ChatGPT Web\.AppImage/);
     assert.doesNotMatch(fs.readFileSync(wrapper, "utf8"), /APPIMAGE_EXTRACT_AND_RUN/);
     assert.equal(fs.existsSync(path.join(versionsRoot, "run-appimage")), true);
     const deadline = Date.now() + 3_000;

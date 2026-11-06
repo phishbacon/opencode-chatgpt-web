@@ -95,7 +95,7 @@ test("over-limit, malformed and manual requests fail explicitly without silently
   expect(() => chatGptPromptFilePayloads(compile([...ten, input(text("eleventh"))]))).toThrow("10 attachments");
   const image = { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,iVBORw==" }] };
   expect(() => chatGptPromptFilePayloads(compile([...ten, image]))).toThrow("10 attachments");
-  expect(() => compile([input("Not a skill envelope")])).toThrow("invalid Codex envelope");
+  expect(() => compile([input("Not a skill envelope")])).toThrow("invalid OpenCode envelope");
   expect(() => compileChatGptWebPrompt(parse([input(text())]), capabilities, token, {
     experimentalSkillAttachments: true, manualControl: true,
   })).toThrow("Zero Risk");
