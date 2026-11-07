@@ -199,7 +199,7 @@ export function prepareOpenCodeDevHost(
   const providerConfig = {
     providers: {
       [PROVIDER_ID]: {
-        name: "ChatGPT Web through OpenCode DEV",
+        name: "OpenCode ChatGPT",
         package: "@opencode/ai/providers/openai/responses",
         settings: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "local-dev-bridge-no-secret" },
         models,
