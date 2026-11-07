@@ -1,6 +1,6 @@
 {
   "name": "codex-web-gpt-launcher",
-  "version": "6.1.18-rc1",
+  "version": "6.1.18-rc2",
   "private": true,
   "description": "Desktop control center for OpenCode ChatGPT Web",
   "author": "miuuyy",
