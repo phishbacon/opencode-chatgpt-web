@@ -84,7 +84,9 @@ describe("OpenCode provider limit sync", () => {
   });
 
   test("opencodeConfigPath honors XDG_CONFIG_HOME and HOME", () => {
-    expect(opencodeConfigPath({ XDG_CONFIG_HOME: "/xdg", HOME: "/home/u" })).toBe("/xdg/opencode/opencode.json");
-    expect(opencodeConfigPath({ HOME: "/home/u" })).toBe("/home/u/.config/opencode/opencode.json");
+    expect(opencodeConfigPath({ XDG_CONFIG_HOME: "/xdg", HOME: "/home/u" }))
+      .toBe(join("/xdg", "opencode", "opencode.json"));
+    expect(opencodeConfigPath({ HOME: "/home/u" }))
+      .toBe(join("/home/u", ".config", "opencode", "opencode.json"));
   });
 });
