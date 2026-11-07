@@ -577,6 +577,23 @@ export function availableChatGptWebModelRoutes(
     && (!route.requiresExtraHigh || capabilities.extraHighAvailable));
 }
 
+/** Live per-model limits the bridge enforces: the measured window plus the
+ * pre-compaction budget OpenCode should carry as its provider limit.context.
+ * Served on /healthz so the host-side identity plugin can keep opencode.json
+ * aligned when the Bigger Context toggle changes. */
+export function openCodeProviderModelLimits(
+  capabilities: ChatGptWebAccountCapabilities,
+): Record<string, { contextWindow: number; autoCompactTokenLimit: number }> {
+  return Object.fromEntries(availableChatGptWebModelRoutes(capabilities).map(route => {
+    const limits = resolveChatGptWebContextLimits(route.backendModel, route.adapterEffort, capabilities,
+      route.interactionMode === "automatic" ? route.modelFamily : undefined);
+    return [route.slug.slice("chatgpt-web/".length), {
+      contextWindow: limits.contextWindow,
+      autoCompactTokenLimit: limits.autoCompactTokenLimit,
+    }];
+  }));
+}
+
 export function chatGptWebRouteEfforts(
   route: ChatGptWebModelRoute,
   capabilities: ChatGptWebAccountCapabilities,

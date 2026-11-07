@@ -13,6 +13,8 @@ import {
 } from "./turn-binding";
 import { sendOpenCodeSessionDeletion, signOpenCodeSessionDeletion } from "./session-lifecycle";
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { syncOpenCodeProviderLimits } from "./provider-limits";
 
 /**
  * Installing into an existing OpenCode configuration must not copy the bridge
@@ -35,8 +37,8 @@ interface RuntimeHookContext {
     location?: { directory?: string; workspaceID?: string };
   }> };
   session: {
-    hook(name: "prompt", callback: (event: { sessionID: string; messageID: string }) => void): Promise<unknown>;
-    hook(name: "context", callback: (event: {
+    hook(name: "prompt", callback: (event: { sessionID: string; messageID: string }) => void | Promise<void>): Promise<unknown>;
+    hook(name: "context" | "compaction", callback: (event: {
       sessionID: string;
       agent: string;
       model: { id: string; providerID: string };
@@ -78,8 +80,13 @@ export function createOpenCodeIdentityPlugin(options: {
       ? readSigningKeyFile(options.keyFile)
       : process.env.OPENCODE_CHATGPT_WEB_TURN_KEY),
   );
+  const epochStatePath = options.keyFile
+    ? `${dirname(options.keyFile)}/compaction-epochs.json`
+    : undefined;
   const getIssuer = () => issuer ??= new OpenCodeTurnIssuer(
     signingKey(),
+    undefined,
+    epochStatePath,
   );
   // OpenCode dispatches the continuation in the same tick as (sometimes one
   // tick before) its compaction-ended event. Signing that continuation before
@@ -100,6 +107,43 @@ export function createOpenCodeIdentityPlugin(options: {
     compactionGates.delete(sessionID);
     gate.release();
   };
+  /**
+   * Keep opencode.json limit.context aligned with the bridge's live limits:
+   * the Bigger Context toggle changes them bridge-side, and OpenCode hot-
+   * reloads its config, so the model picker follows the toggle automatically.
+   * Gated to one bridge probe per minute; prompts simply await the no-op.
+   */
+  let lastLimitSyncAt = 0;
+  const syncProviderLimits = async (): Promise<void> => {
+    const bridgeURL = options.bridgeURL ?? process.env.OPENCODE_CHATGPT_WEB_BRIDGE_URL;
+    if (!bridgeURL) return;
+    const now = Date.now();
+    if (now - lastLimitSyncAt < 60_000) return;
+    lastLimitSyncAt = now;
+    try {
+      await syncOpenCodeProviderLimits({ bridgeURL });
+      // The bridge also publishes its accepted turn epochs: adopt any that are
+      // ahead of local state so a plugin reload cannot demote a compacted
+      // session back to epoch zero (rejected as "an earlier compaction epoch").
+      try {
+        const response = await fetch(`${bridgeURL.replace(/\/+$/, "")}/healthz`, { signal: AbortSignal.timeout(3_000) });
+        if (response.ok) {
+          const payload = await response.json() as {
+            openCodeActiveEpochs?: Record<string, number>;
+            openCodeReceiptEpochs?: Record<string, number>;
+          };
+          // Receipt epochs are durable across bridge restarts and are the
+          // authoritative compaction epoch for retained sessions; verifier
+          // epochs cover turns accepted since the bridge last booted.
+          if (payload.openCodeReceiptEpochs) getIssuer().mergeEpochs(payload.openCodeReceiptEpochs);
+          if (payload.openCodeActiveEpochs) getIssuer().mergeEpochs(payload.openCodeActiveEpochs);
+        }
+      } catch { /* bridge restarting */ }
+    } catch {
+      /* Bridge restarting or unreachable; retried on the next prompt. */
+    }
+  };
+
   const activatePrompt = (sessionID: string) => {
     const prompt = prompts.get(sessionID);
     if (prompt && prompt !== activated.get(sessionID)) {
@@ -154,10 +198,16 @@ export function createOpenCodeIdentityPlugin(options: {
           console.warn(`[opencode-chatgpt-web] trusted lifecycle events unavailable: ${error instanceof Error ? error.message : String(error)}`);
         }
       });
-      await ctx.session.hook("prompt", ({ sessionID, messageID }) => {
+      await ctx.session.hook("prompt", async ({ sessionID, messageID }) => {
+        await syncProviderLimits();
         prompts.set(sessionID, messageID);
       });
-      await ctx.session.hook("context", async event => {
+      const observeTurnContext = async (event: {
+        sessionID: string;
+        agent: string;
+        model: { id: string; providerID: string };
+        tools: Record<string, unknown>;
+      }): Promise<void> => {
         if (event.model.providerID !== providerID) {
           return;
         }
@@ -178,7 +228,15 @@ export function createOpenCodeIdentityPlugin(options: {
         } catch (error) {
           throw error;
         }
-      });
+      };
+      // OpenCode's "context" agent hook only runs on the PRIMARY flow; the
+      // compaction flow triggers the separate "compaction" agent hook with the
+      // same trusted payload (sessionID, model, agent, tools) inside prepare(),
+      // strictly BEFORE model.request. Without observing that hook, a
+      // prompt-start compaction had no tool context to sign and the turn died.
+      await ctx.session.hook("context", observeTurnContext);
+      await ctx.session.hook("compaction", observeTurnContext);
+      void syncProviderLimits();
       await ctx.session.hook("model.request", async event => {
         if (event.kind !== "primary" && event.kind !== "compaction") {
           return;

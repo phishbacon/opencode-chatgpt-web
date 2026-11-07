@@ -62,9 +62,16 @@ export function verifyOpenCodeResponsesIngress(
   // The upstream Codex parser accepts additional authority-bearing envelope
   // shapes. The OpenCode provider has no signed counterpart for those fields.
   validateOpenCodeResponsesProtocol(rawBody);
-  const toolsHash = hashOpenCodeWireTools(isRecord(rawBody) ? rawBody.tools : undefined);
-  const expected = { model, toolsHash };
+  const wireTools = isRecord(rawBody) ? rawBody.tools : undefined;
+  const expected: { model: string; toolsHash?: string } = { model };
+  if (Array.isArray(wireTools)) expected.toolsHash = hashOpenCodeWireTools(wireTools);
   const claims = verifier.verify(header, expected, { consume: false });
+  // OpenCode omits the tools field from prompt-start compaction bodies; those
+  // claims still carry the trusted inventory hash, and a compaction executes no
+  // tools. Primary requests must always present the native tool inventory.
+  if (!Array.isArray(wireTools) && claims.purpose !== "compaction") {
+    throw new OpenCodeTurnBindingError("OpenCode provider request must include the native tool inventory");
+  }
   const hasToolHistory = Array.isArray(input) && input.some(item => isRecord(item)
     && (item.type === "function_call" || item.type === "function_call_output"));
   if (hasToolHistory && !options.receipts) {

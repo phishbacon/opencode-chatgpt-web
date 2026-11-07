@@ -135,6 +135,36 @@ describe("OpenCode trusted identity plugin lifecycle", () => {
     } finally { f.events.close(); }
   });
 
+  test("observes OpenCode's compaction agent hook so a prompt-start compaction can sign cold", async () => {
+    const f = await fixture();
+    // Fresh prompt: only the prompt hook has fired. OpenCode's PRIMARY-only
+    // "context" hook never runs for a compaction-first dispatch, so without
+    // the "compaction" agent hook this prompt has no tool context to sign.
+    await f.hooks.get("prompt")!({ sessionID: SESSION, messageID: "msg_999999999" });
+    // prepare("compaction") triggers the agent hook as { ...draft, agent, tools }
+    // before model.request — same trusted payload the context hook receives.
+    await f.hooks.get("compaction")!({
+      sessionID: SESSION, model: MODEL, agent: "build", tools: TOOLS,
+    });
+    const headers: Record<string, string> = {};
+    await f.hooks.get("model.request")!({ sessionID: SESSION, kind: "compaction", model: MODEL, headers });
+    const signed = headers[OPENCODE_TURN_HEADER];
+    expect(typeof signed).toBe("string");
+    const claims = f.verifier.verify(signed!, { model: "opencode-chatgpt-web/gpt-6" });
+    expect(claims.purpose).toBe("compaction");
+    expect(claims.messageID).toBe("msg_999999999");
+    // The same prompt's primary request signs too, now that context exists.
+    const primary: Record<string, string> = {};
+    await f.hooks.get("model.request")!({ sessionID: SESSION, kind: "primary", model: MODEL, headers: primary });
+    expect(primary[OPENCODE_TURN_HEADER]).toBeString();
+    // A prompt with no observation from either hook still fails closed.
+    await f.hooks.get("prompt")!({ sessionID: "ses_888888888", messageID: "msg_888888888" });
+    const unseen: Record<string, string> = {};
+    await expect(f.hooks.get("model.request")!(
+      { sessionID: "ses_888888888", kind: "compaction", model: MODEL, headers: unseen },
+    )).rejects.toThrow("no matching tool context");
+  });
+
   test("holds a continuation until an in-flight compaction settles, then signs the new epoch", async () => {
     const f = await fixture();
     try {

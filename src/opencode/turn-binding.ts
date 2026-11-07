@@ -10,7 +10,8 @@
  * be transferred in this envelope.
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 const HEADER_VERSION = 2;
 const MAX_ENVELOPE_LENGTH = 2048;
@@ -18,6 +19,7 @@ const MAX_REQUEST_AGE_MS = 2 * 60_000;
 const MAX_CLOCK_SKEW_MS = 5_000;
 const ID = /^[A-Za-z0-9_-]{8,160}$/;
 const NONCE = /^[a-f0-9]{32}$/;
+const MAX_EPOCH_SESSIONS = 512;
 const TOOLS_HASH = /^[a-f0-9]{64}$/;
 const TOOL_NAME = /^[\w.-]{1,160}$/;
 const MAX_TOOL_COUNT = 512;
@@ -217,8 +219,67 @@ export class OpenCodeTurnIssuer {
    * Primary requests never use this fallback.
    */
   private readonly sessionContexts = new Map<string, { model: string; toolsHash: string; owner: OpenCodeTurnOwner }>();
+  private epochsLoaded = false;
 
-  constructor(private readonly signingKey: Buffer, private readonly clock: () => number = Date.now) {}
+  /**
+   * OpenCode re-imports the plugin on config/watcher events; an in-memory
+   * epoch map would silently reset to zero while the bridge's verifier keeps
+   * its own epoch, and the next prompt would be rejected as "an earlier
+   * compaction epoch". Persist epochs beside the signing key so reloads and
+   * process restarts keep the same truth the bridge saw.
+   */
+  constructor(
+    private readonly signingKey: Buffer,
+    private readonly clock: () => number = Date.now,
+    private readonly epochStatePath?: string,
+  ) {}
+
+  private loadEpochs(): void {
+    if (this.epochsLoaded) return;
+    this.epochsLoaded = true;
+    if (!this.epochStatePath) return;
+    try {
+      if (!existsSync(this.epochStatePath)) return;
+      const raw = JSON.parse(readFileSync(this.epochStatePath, "utf8")) as unknown;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
+      let added = 0;
+      for (const [sessionID, epoch] of Object.entries(raw as Record<string, unknown>)) {
+        if (!ID.test(sessionID) || !Number.isSafeInteger(epoch) || (epoch as number) < 0) continue;
+        if (added++ >= MAX_EPOCH_SESSIONS) break;
+        this.compactionEpochs.set(sessionID, epoch as number);
+      }
+    } catch {
+      /* Corrupt state fails safe to zero epochs (the pre-persistence behavior). */
+    }
+  }
+
+  private saveEpochs(): void {
+    if (!this.epochStatePath) return;
+    try {
+      mkdirSync(dirname(this.epochStatePath), { recursive: true, mode: 0o700 });
+      const temporary = `${this.epochStatePath}.${process.pid}.tmp`;
+      writeFileSync(temporary, JSON.stringify(Object.fromEntries(this.compactionEpochs)), { mode: 0o600 });
+      renameSync(temporary, this.epochStatePath);
+    } catch {
+      /* Persistence must never break signing. */
+    }
+  }
+
+  /** Adopt bridge-published epochs when they are ahead of local state (plugin reload recovery). */
+  mergeEpochs(entries: Record<string, number>): void {
+    this.loadEpochs();
+    if (!entries || typeof entries !== "object") return;
+    let changed = false;
+    for (const [sessionID, epoch] of Object.entries(entries)) {
+      if (!ID.test(sessionID) || !Number.isSafeInteger(epoch) || (epoch as number) < 0) continue;
+      const local = this.compactionEpochs.get(sessionID) ?? 0;
+      if ((epoch as number) > local) {
+        this.compactionEpochs.set(sessionID, epoch as number);
+        changed = true;
+      }
+    }
+    if (changed) this.saveEpochs();
+  }
 
   beginPrompt(sessionID: string, messageID: string): void {
     if (!ID.test(sessionID) || !ID.test(messageID)) {
@@ -232,10 +293,12 @@ export class OpenCodeTurnIssuer {
 
   /** Only the trusted OpenCode event stream may signal completed compaction. */
   noteCompaction(sessionID: string): void {
+    this.loadEpochs();
     if (!ID.test(sessionID) || !this.current.has(sessionID)) return;
     const next = (this.compactionEpochs.get(sessionID) ?? 0) + 1;
     if (!Number.isSafeInteger(next)) throw new OpenCodeTurnBindingError("OpenCode compaction epoch overflow");
     this.compactionEpochs.set(sessionID, next);
+    this.saveEpochs();
   }
 
   observeContext(sessionID: string, model: string, tools: Record<string, unknown>, owner: OpenCodeTurnOwner): void {
@@ -252,6 +315,7 @@ export class OpenCodeTurnIssuer {
   }
 
   signPrimaryRequest(sessionID: string, model: string): string {
+    this.loadEpochs();
     const current = this.current.get(sessionID);
     if (!current) throw new OpenCodeTurnBindingError("No trusted OpenCode prompt owns this provider request");
     if (!current.context || current.context.model !== model) {
@@ -285,6 +349,7 @@ export class OpenCodeTurnIssuer {
    * compaction returns.
    */
   signCompactionRequest(sessionID: string, model: string): string {
+    this.loadEpochs();
     const current = this.current.get(sessionID);
     if (!current) throw new OpenCodeTurnBindingError("No trusted OpenCode prompt owns this provider request");
     const context = current.context ?? this.sessionContexts.get(sessionID);
@@ -312,14 +377,23 @@ export class OpenCodeTurnIssuer {
   }
 
   retire(sessionID: string): void {
+    this.loadEpochs();
     this.current.delete(sessionID);
     this.compactionEpochs.delete(sessionID);
     this.sessionContexts.delete(sessionID);
+    this.saveEpochs();
   }
 }
 
 /** Bridge-side state: rejects forged, expired, replayed and superseded calls. */
 export class OpenCodeTurnVerifier {
+  /** Bridge-published view of accepted turn epochs (healthz sync source). */
+  activeEpochs(): Record<string, number> {
+    const epochs: Record<string, number> = {};
+    for (const [sessionID, state] of this.current) epochs[sessionID] = state.epoch;
+    return epochs;
+  }
+
   private readonly seenRequests = new Map<string, number>();
   private readonly current = new Map<string, { nonce: string; started: number; epoch: number; ownerKey: string; retired: boolean }>();
   /** Keep authenticated deletion identity so a transport retry cannot retire another owner. */

@@ -4,6 +4,7 @@
  * receipts to validate its own native function_call_output history without
  * trusting caller-authored Responses items or replacing OpenCode permissions.
  */
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -119,6 +120,22 @@ describe("OpenCode website tool receipt ledger", () => {
     f.ledger.validateContinuation(owner, history);
   });
 
+  test("a bridge restart can still compact sessions whose history predates its ledger", () => {
+    const f = harness();
+    // Fresh ledger = bridge restarted: none of this session's historical calls
+    // were issued in-process. OpenCode history is canonical, so a signed
+    // compaction summary may replay it (compaction executes nothing), while
+    // primaries stay fail-closed against unknown history.
+    const compaction = f.verifier.verify(
+      f.issuer.signCompactionRequest(SESSION, MODEL), { model: MODEL }, { consume: false },
+    );
+    expect(compaction.purpose).toBe("compaction");
+    f.ledger.validateContinuation(compaction, history);
+    f.ledger.validateContinuation(compaction, history, { consume: false });
+    expect(() => f.ledger.validateContinuation(f.claims(), history))
+      .toThrow("unissued or cross-session tool call");
+  });
+
   test("rejects duplicate tool IDs, unauthorized tool names and malformed arguments without partially issuing", () => {
     const f = harness();
     const owner = f.claims();
@@ -140,8 +157,12 @@ describe("OpenCode website tool receipt ledger", () => {
     f.begin("ses_other123", "msg_other123");
     expect(() => f.ledger.validateContinuation(f.claims("ses_other123"), history)).toThrow("unissued or cross-session");
     f.begin(SESSION, "msg_nextturn123");
-    expect(() => f.ledger.validateContinuation(f.claims(), history)).toThrow("previous turn still has outstanding");
-    f.ledger.validateContinuation(owner, history);
+    // A later turn resolves the dead turn's outstanding results from its
+    // canonical history instead of wedging the session forever: issuance and
+    // call identity are already proven, OpenCode history is canonical.
+    f.ledger.validateContinuation(f.claims(), history);
+    // The dead turn itself may no longer continue.
+    expect(() => f.ledger.validateContinuation(owner, history)).toThrow("superseded turn");
     const next = f.claims();
     f.ledger.validateContinuation(next, history);
     f.ledger.issueBatch(next, WIRE, [{ callId: "call_gamma", name: "read", arguments: '{"path":"/tmp/new"}' }]);
@@ -153,6 +174,41 @@ describe("OpenCode website tool receipt ledger", () => {
     ])).toThrow("different turn or inventory");
     f.ledger.retireSession(SESSION);
     expect(() => f.ledger.validateContinuation(next, history)).toThrow("unissued or cross-session");
+  });
+
+  test("a later turn resolves a dead turn's outstanding batch from canonical history", () => {
+    const f = harness();
+    const owner = f.claims();
+    f.ledger.issueBatch(owner, WIRE, CALLS);
+    // The issuing turn dies before its continuation arrives (tool timeout,
+    // crash, or a rejected request): its results never reached the bridge.
+    f.begin(SESSION, "msg_aftercrash12");
+    f.ledger.validateContinuation(f.claims(), history);
+    // Results are pinned from canonical history; tampering is rejected after.
+    expect(() => f.ledger.validateContinuation(f.claims(), history.map(item =>
+      item.type === "function_call_output" && item.call_id === "call_alpha"
+        ? { ...item, output: "forged" } : item)))
+      .toThrow("previously completed tool output was changed");
+    // The session is unwedged: the next batch issues normally.
+    f.ledger.issueBatch(f.claims(), WIRE, [{ callId: "call_gamma", name: "read", arguments: '{"path":"/tmp/next"}' }]);
+  });
+
+  test("stays fail-closed when a later turn omits the outstanding results", () => {
+    const f = harness();
+    const owner = f.claims();
+    f.ledger.issueBatch(owner, WIRE, CALLS);
+    f.begin(SESSION, "msg_noresults12");
+    const later = f.claims();
+    // Tool history without the pending results cannot resolve the batch.
+    expect(() => f.ledger.validateContinuation(later, [{ type: "message", role: "user", content: "next turn" }]))
+      .toThrow("parallel tool batch has missing");
+    // A pending call whose result is stripped still fails closed.
+    expect(() => f.ledger.validateContinuation(later, history.filter(item =>
+      !(item.type === "function_call_output" && item.call_id === "call_alpha"))))
+      .toThrow("tool call_alpha has no result");
+    // Non-array input cannot reconcile outstanding receipts at all.
+    expect(() => f.ledger.validateContinuation(later, "plain prompt"))
+      .toThrow("canonical history omitted");
   });
 
   test("trusted compaction retires omitted completed calls while preserving retained receipts", () => {
@@ -185,21 +241,60 @@ describe("OpenCode website tool receipt ledger", () => {
     expect(() => f.ledger.validateContinuation(first, retained)).toThrow("earlier compaction epoch");
   });
 
-  test("compaction cannot discard outstanding calls or invent canonical history", () => {
+  test("the compaction boundary commits present results and retires absent ones instead of wedging", () => {
     const f = harness();
     const first = f.claims();
     f.ledger.issueBatch(first, WIRE, CALLS);
     f.issuer.noteCompaction(SESSION);
     const next = f.claims();
+    expect(next.compactionEpoch).toBe(1);
+    // Retirement still requires canonical tool history: a body that carries none
+    // cannot advance the epoch on its own.
     expect(() => f.ledger.validateContinuation(next, "summary string"))
       .toThrow("compaction requires canonical native tool history");
-    expect(() => f.ledger.validateContinuation(next, []))
-      .toThrow("parallel tool batch has missing");
-    expect(() => f.ledger.validateContinuation(next, history.filter(item => !('call_id' in item)
-      || item.call_id === "call_beta"))).toThrow("parallel tool batch has missing");
-    // Compaction changes only after both native tool results are reconciled.
-    f.ledger.validateContinuation(next, history);
+    // Partial canonical history at the boundary: the result it carries commits,
+    // the call it no longer contains retires — the session never wedges.
+    const partial = history.filter(item => !('call_id' in item) || item.call_id !== "call_beta");
+    f.ledger.validateContinuation(next, partial, { consume: false });
+    f.ledger.validateContinuation(next, partial);
+    expect(f.ledger.sessionEpochs()[SESSION]).toBe(1);
+    // The retired call ID can never come back, issued or not.
+    expect(() => f.ledger.validateContinuation(next, history))
+      .toThrow("compacted tool call ID was replayed");
     f.ledger.issueBatch(next, WIRE, [{ callId: "call_gamma", name: "read", arguments: "{}" }]);
+    f.ledger.validateContinuation(next, [
+      ...partial,
+      { type: "function_call", call_id: "call_gamma", name: "read", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_gamma", output: "ok" },
+    ]);
+  });
+
+  test("a compaction body may omit receipts; the epoch boundary reconciles them", () => {
+    const f = harness();
+    const owner = f.claims();
+    f.ledger.issueBatch(owner, WIRE, CALLS);
+    const compaction = f.verifier.verify(
+      f.issuer.signCompactionRequest(SESSION, MODEL), { model: MODEL }, { consume: false },
+    );
+    expect(compaction.purpose).toBe("compaction");
+    expect(compaction.compactionEpoch).toBe(0);
+    // OpenCode renders the summarization request as the budget allows: full
+    // transcript, kept tail dropped, or flattened to text. None of those is a
+    // continuation, so an empty rendering neither fails nor reconciles here.
+    f.ledger.validateContinuation(compaction, []);
+    expect(f.ledger.sessionEpochs()[SESSION]).toBe(0);
+    // A normal turn still fails closed on the missing results.
+    f.begin(SESSION, "msg_afterrender1");
+    expect(() => f.ledger.validateContinuation(f.claims(), [{ type: "message", role: "user", content: "next" }]))
+      .toThrow("parallel tool batch has missing");
+    // The first post-compaction request carries the real new history: present
+    // results commit, absent ones would retire at the boundary.
+    f.issuer.noteCompaction(SESSION);
+    const next = f.claims();
+    expect(next.compactionEpoch).toBe(1);
+    f.ledger.validateContinuation(next, history);
+    expect(f.ledger.sessionEpochs()[SESSION]).toBe(1);
+    f.ledger.issueBatch(next, WIRE, [{ callId: "call_gamma", name: "read", arguments: '{"path":"/tmp/next"}' }]);
   });
 
   test("compaction can retire all completed receipts but cannot resurrect their IDs", () => {
@@ -214,5 +309,85 @@ describe("OpenCode website tool receipt ledger", () => {
     f.ledger.validateContinuation(next, [{ type: "message", role: "user", content: "compacted summary" }]);
     expect(() => f.ledger.issueBatch(next, WIRE, [CALLS[1]!])).toThrow("already been issued");
     expect(() => f.ledger.validateContinuation(next, history)).toThrow("compacted tool call ID was replayed");
+  });
+
+  test("persists receipts across a bridge restart so retained history stays verifiable", () => {
+    const statePath = join(mkdtempSync(join(tmpdir(), "oc-receipts-")), "tool-receipts.json");
+    const key = randomBytes(32);
+    let now = 1_800_000_000_000;
+    const clock = () => now;
+
+    // Bridge process one: issue the batch and complete the turn.
+    const issuerA = new OpenCodeTurnIssuer(key, clock);
+    issuerA.beginPrompt(SESSION, "msg_persist123");
+    issuerA.observeContext(SESSION, MODEL, CONTEXT, OWNER);
+    const ledgerA = new OpenCodeToolReceiptLedger(statePath);
+    const claimsA = new OpenCodeTurnVerifier(key, clock).verify(
+      issuerA.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false },
+    );
+    ledgerA.issueBatch(claimsA, WIRE, CALLS);
+    ledgerA.validateContinuation(claimsA, history);
+    expect(readFileSync(statePath, "utf8")).toContain("call_alpha");
+
+    // Bridge process two (restart): fresh in-memory maps, same state file.
+    now += 60_000;
+    const ledgerB = new OpenCodeToolReceiptLedger(statePath);
+    const issuerB = new OpenCodeTurnIssuer(key, clock);
+    issuerB.beginPrompt(SESSION, "msg_persist456");
+    issuerB.observeContext(SESSION, MODEL, CONTEXT, OWNER);
+    const claimsB = new OpenCodeTurnVerifier(key, clock).verify(
+      issuerB.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false },
+    );
+    expect(() => ledgerB.validateContinuation(claimsB, history)).not.toThrow();
+
+    // Persisted output hashes still reject edited history.
+    now += 60_000;
+    const tampered = history.map(item => (item as { call_id?: string }).call_id === "call_alpha" && item.type === "function_call_output"
+      ? { ...item, output: "forged" } : item);
+    issuerB.beginPrompt(SESSION, "msg_persist789");
+    issuerB.observeContext(SESSION, MODEL, CONTEXT, OWNER);
+    const claimsC = new OpenCodeTurnVerifier(key, clock).verify(
+      issuerB.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false },
+    );
+    expect(() => ledgerB.validateContinuation(claimsC, tampered)).toThrow("previously completed tool output was changed");
+
+    // Cross-session history stays rejected after reload.
+    now += 60_000;
+    const otherIssuer = new OpenCodeTurnIssuer(key, clock);
+    otherIssuer.beginPrompt("ses_other999", "msg_other123");
+    otherIssuer.observeContext("ses_other999", MODEL, CONTEXT, OWNER);
+    const otherClaims = new OpenCodeTurnVerifier(key, clock).verify(
+      otherIssuer.signPrimaryRequest("ses_other999", MODEL), { model: MODEL }, { consume: false },
+    );
+    expect(() => ledgerB.validateContinuation(otherClaims, history)).toThrow("unissued or cross-session");
+  });
+
+  test("exposes durable session epochs for the signer's healthz sync", () => {
+    const f = harness();
+    const owner = f.claims();
+    f.ledger.issueBatch(owner, WIRE, CALLS);
+    f.ledger.validateContinuation(owner, history);
+    expect(f.ledger.sessionEpochs()[SESSION]).toBe(0);
+
+    f.begin(SESSION, "msg_epochnext12");
+    f.issuer.noteCompaction(SESSION);
+    const compacted = f.claims();
+    expect(compacted.purpose).toBeUndefined(); // claims helper signs primaries; epoch is what matters
+    f.ledger.validateContinuation(compacted, history);
+    expect(f.ledger.sessionEpochs()[SESSION]).toBe(1);
+  });
+
+  test("corrupt receipt state fails closed as an empty ledger", () => {
+    const statePath = join(mkdtempSync(join(tmpdir(), "oc-receipts-bad-")), "tool-receipts.json");
+    writeFileSync(statePath, "{corrupt");
+    const key = randomBytes(32);
+    const ledger = new OpenCodeToolReceiptLedger(statePath);
+    const issuer = new OpenCodeTurnIssuer(key);
+    issuer.beginPrompt(SESSION, "msg_corrupt12");
+    issuer.observeContext(SESSION, MODEL, CONTEXT, OWNER);
+    const claims = new OpenCodeTurnVerifier(key).verify(
+      issuer.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false },
+    );
+    expect(() => ledger.validateContinuation(claims, history)).toThrow("unissued or cross-session");
   });
 });

@@ -36,8 +36,7 @@ import {
   CHATGPT_WEB_LUNA_BACKEND_MODEL,
   isChatGptWebModelSlug,
   requireChatGptWebModelRoute,
-  type ChatGptWebModelRoute,
-} from "./chatgpt-web-models";
+  type ChatGptWebModelRoute, openCodeProviderModelLimits } from "./chatgpt-web-models";
 import { forwardNativeCodexRequest, type NativeFetch, type NativeImageEndpoint } from "./native-passthrough";
 import { fetchNativeCodex } from "./native-network";
 import {
@@ -1115,7 +1114,8 @@ export function startServer(
       ? new OpenCodeTurnVerifier(parseTurnSigningKey(process.env.OPENCODE_CHATGPT_WEB_TURN_KEY))
       : undefined
   );
-  const openCodeToolReceipts = dependencies.openCodeToolReceipts ?? new OpenCodeToolReceiptLedger();
+  const openCodeToolReceipts = dependencies.openCodeToolReceipts
+    ?? new OpenCodeToolReceiptLedger(process.env.CODEX_CHATGPT_WEB_RECEIPTS_STATE || undefined);
   const openCodeSessionDeletionKey = dependencies.openCodeSessionDeletionKey ?? (
     !dependencies.openCodeDevListener && process.env.OPENCODE_CHATGPT_WEB_TURN_KEY
       ? parseTurnSigningKey(process.env.OPENCODE_CHATGPT_WEB_TURN_KEY) : undefined
@@ -1175,6 +1175,9 @@ export function startServer(
           port: config.port,
           uptime: (Date.now() - startedAt) / 1_000,
           accepting_turns: !draining,
+          openCodeModelLimits: openCodeProviderModelLimits(config),
+          openCodeActiveEpochs: openCodeTurnVerifier?.activeEpochs() ?? {},
+          openCodeReceiptEpochs: openCodeToolReceipts?.sessionEpochs() ?? {},
           successful_model_catalog_requests: successfulModelCatalogRequests,
           last_successful_model_catalog_request_at: lastSuccessfulModelCatalogRequestAt,
           model_catalog_requests: modelCatalogRequests,

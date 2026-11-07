@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # The image's `bun` user already owns uid1000 — the same uid as the host user
 # that owns the mounted key files and noVNC password, so the container reads
 # them without copying credentials.
-RUN mkdir -p /opt/codex-chatgpt-web /home/bun/.codex-chatgpt-web \
-    && chown -R bun:bun /opt/codex-chatgpt-web /home/bun/.codex-chatgpt-web
+RUN mkdir -p /opt/codex-chatgpt-web /home/bun/.codex-chatgpt-web /home/bun/.codex \
+    && chown -R bun:bun /opt/codex-chatgpt-web /home/bun/.codex-chatgpt-web /home/bun/.codex
 WORKDIR /opt/codex-chatgpt-web
 
 COPY --chown=bun:bun package.json bun.lock ./

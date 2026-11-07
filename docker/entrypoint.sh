@@ -53,6 +53,9 @@ start_electron() {
 # holds, so the container bridge authenticates turns signed on the host.
 [ -f /run/secrets/turn-signing.key ] || { echo "missing /run/secrets/turn-signing.key" >&2; exit 1; }
 export OPENCODE_CHATGPT_WEB_TURN_KEY="$(cat /run/secrets/turn-signing.key)"
+# Persist tool receipts in the bridge home (volume) so a container restart
+# never forgets completed calls and blocks retained-history continuations.
+export CODEX_CHATGPT_WEB_RECEIPTS_STATE="/home/bun/.codex-chatgpt-web/tool-receipts.json"
 
 # First run: production configuration (no purpose flag) with the OpenCode
 # website MCP contract and the fixed `opencode-chatgpt-web` connector name.
@@ -77,6 +80,7 @@ if [ ! -f "$CONFIG" ]; then
     attempt=0
     until bun run src/cli.ts setup --full --automatic-browser-interaction --opencode-website-tools \
         --acknowledge-unofficial \
+        --replace-codex-route \
         --browser-host-descriptor "$DESCRIPTOR" \
         --tunnel-id "$TUNNEL_ID" \
         --runtime-key-file /run/secrets/tunnel-runtime.key

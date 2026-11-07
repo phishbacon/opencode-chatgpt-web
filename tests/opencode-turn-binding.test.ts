@@ -3,6 +3,7 @@
  * metadata. OpenCode must authenticate an equivalent owner through signed V2
  * hook claims; these tests verify the OpenCode-only trust boundary.
  */
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -231,6 +232,43 @@ describe("OpenCode turn ownership", () => {
     bare.beginPrompt("ses_abcdefgh", "msg_abcdefgh");
     expect(() => bare.signCompactionRequest("ses_abcdefgh", MODEL))
       .toThrow("no matching tool context");
+  });
+
+  test("compaction epochs survive plugin reloads via disk persistence and bridge merge", () => {
+    const statePath = join(mkdtempSync(join(tmpdir(), "oc-epochs-")), "compaction-epochs.json");
+    const key = randomBytes(32);
+    let now = 1_800_000_000_000;
+    const clock = () => now;
+    const verifier = new OpenCodeTurnVerifier(key, clock);
+
+    const issuerA = new OpenCodeTurnIssuer(key, clock, statePath);
+    issuerA.beginPrompt(SESSION, MESSAGE);
+    issuerA.observeContext(SESSION, MODEL, TOOLS, OWNER);
+    expect(verifier.verify(issuerA.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false }).compactionEpoch).toBe(0);
+    issuerA.noteCompaction(SESSION);
+    expect(readFileSync(statePath, "utf8")).toContain(SESSION);
+
+    // Plugin reload: a fresh issuer must recover epoch1 from disk.
+    now += 60_000;
+    const issuerB = new OpenCodeTurnIssuer(key, clock, statePath);
+    issuerB.beginPrompt(SESSION, "msg_987654321");
+    issuerB.observeContext(SESSION, MODEL, TOOLS, OWNER);
+    expect(verifier.verify(issuerB.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false }).compactionEpoch).toBe(1);
+
+    // A reload with no local state adopts the bridge's higher epochs instead of
+    // demoting the session (the "earlier compaction epoch" failure).
+    const issuerC = new OpenCodeTurnIssuer(key, clock);
+    issuerC.mergeEpochs({ [SESSION]: 7, "ses_malicious999": -1, "not-a-session": 1.5 });
+    issuerC.beginPrompt(SESSION, "msg_999999999");
+    issuerC.observeContext(SESSION, MODEL, TOOLS, OWNER);
+    expect(verifier.verify(issuerC.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false }).compactionEpoch).toBe(7);
+
+    // Corrupt state fails safe to zero epochs (pre-persistence behavior).
+    writeFileSync(statePath, "{corrupt");
+    const issuerD = new OpenCodeTurnIssuer(key, clock, statePath);
+    issuerD.beginPrompt(SESSION, "msg_888888888");
+    issuerD.observeContext(SESSION, MODEL, TOOLS, OWNER);
+    expect(verifier.verify(issuerD.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false }).compactionEpoch).toBe(0);
   });
 
   test("rejects same-nonce signed changes in session owner even when a second issuer holds the signing key", () => {

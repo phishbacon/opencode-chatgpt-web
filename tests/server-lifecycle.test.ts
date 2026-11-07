@@ -279,7 +279,18 @@ test("a real HTTP peer disconnect releases a streaming turn", async () => {
       socket.once("error", reject);
     });
 
-    expect(await (await fetch(`${endpoint}/healthz`)).json()).toMatchObject({ active_http_turns: 1 });
+    const healthz = await (await fetch(`${endpoint}/healthz`)).json() as {
+      active_http_turns: number;
+      openCodeModelLimits: Record<string, { contextWindow: number; autoCompactTokenLimit: number }>;
+      openCodeReceiptEpochs: Record<string, number>;
+    };
+    expect(healthz.active_http_turns).toBe(1);
+    expect(typeof healthz.openCodeReceiptEpochs).toBe("object");
+    const publishedLimits = Object.values(healthz.openCodeModelLimits);
+    expect(publishedLimits.length).toBeGreaterThan(0);
+    for (const limits of publishedLimits) {
+      expect(limits.autoCompactTokenLimit).toBeLessThanOrEqual(limits.contextWindow);
+    }
     socket.destroy();
 
     const deadline = Date.now() + 1_000;

@@ -189,7 +189,10 @@ export function prepareOpenCodeDevHost(
       name: route.displayName,
       modelID: `${PROVIDER_ID}/${suffix}`,
       capabilities: { tools: true, input: ["text"], output: ["text"] },
-      limit: { context: limits.contextWindow, output: Math.min(16_384, Math.floor(limits.contextWindow / 8)) },
+      // Expose the practical pre-compaction budget, not the raw window: OpenCode
+      // compacts near limit.context, and a compaction summary that approaches the
+      // measured ChatGPT Web window is rejected by the browser-side size guard.
+      limit: { context: limits.autoCompactTokenLimit, output: Math.min(16_384, Math.floor(limits.contextWindow / 8)) },
     }];
   }));
   const defaultModel = routes.find(route => route.slug === "chatgpt-web/gpt-6-sol") ?? routes[0]!;

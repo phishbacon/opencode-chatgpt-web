@@ -18,6 +18,7 @@ import {
   chatGptThreadOwnershipKey, chatGptTurnExecutionKey, chatGptTurnRoundKey,
 } from "../src/adapters/chatgpt-web/turn-execution";
 
+const SESSION = "ses_123456789";
 const MODEL = "opencode-chatgpt-web/light";
 const TOOL_CONTEXT = {
   shell: { description: "Execute a shell command", input: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
@@ -94,6 +95,27 @@ describe("OpenCode Responses ingress", () => {
     expect(() => verifyOpenCodeResponsesIngress(f.request(forged, header), forged, f.verifier)).toThrow("cannot claim");
     expect(verifyOpenCodeResponsesIngress(f.request(f.body, header), f.body, f.verifier)?.model).toBe(MODEL);
     expect(() => verifyOpenCodeResponsesIngress(f.request(f.body, header), f.body, f.verifier)).toThrow("already accepted");
+  });
+
+  test("accepts tool-less compaction bodies but never tool-less primaries", () => {
+    const f = fixture();
+    // OpenCode omits tools from prompt-start compaction bodies; the signed
+    // claims still carry the trusted inventory hash and compaction runs no tools.
+    const compactionBody = { model: MODEL, input: "Summarize the conversation", stream: false };
+    const accepted = verifyOpenCodeResponsesIngress(
+      f.request(compactionBody, f.issuer.signCompactionRequest(SESSION, MODEL)),
+      compactionBody,
+      f.verifier,
+    );
+    expect(accepted?.purpose).toBe("compaction");
+    expect(accepted?.sessionID).toBe(SESSION);
+    // A primary request without the native tool inventory still fails closed.
+    const primaryBody = { model: MODEL, input: "check", stream: false };
+    expect(() => verifyOpenCodeResponsesIngress(
+      f.request(primaryBody, f.issuer.signPrimaryRequest(SESSION, MODEL)),
+      primaryBody,
+      f.verifier,
+    )).toThrow("must include the native tool inventory");
   });
 
   test("tool inventory must exactly match native context before signature can be consumed", () => {

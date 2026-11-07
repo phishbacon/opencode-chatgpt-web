@@ -24,6 +24,9 @@ services:
     volumes:
       # Config, tunnel profiles and browser/login state (survives recreation).
       - codex-browser-home:/home/bun/.codex-chatgpt-web
+      # Codex route config the launcher's startup check requires; without it
+      # the Responses daemon fails closed on recreation.
+      - codex-browser-codex-home:/home/bun/.codex
       # Read-only secrets; never copied into the image.
       - ${HOME}/.codex-chatgpt-web-dev/opencode-host/turn-signing.key:/run/secrets/turn-signing.key:ro
       - ${HOME}/.codex-chatgpt-web-dev/secrets/tunnel-runtime-automatic.key:/run/secrets/tunnel-runtime.key:ro
@@ -34,3 +37,5 @@ volumes:
   # login) is adopted rather than a project-prefixed replacement.
   codex-browser-home:
     name: codex-browser-home
+  codex-browser-codex-home:
+    name: codex-browser-codex-home
