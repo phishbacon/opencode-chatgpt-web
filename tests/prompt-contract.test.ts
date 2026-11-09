@@ -2,7 +2,7 @@ import { PRODUCT_NAME } from "./../src/branding";
 import { expect, test } from "bun:test";
 import {
   CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET,
-  CHATGPT_COMPACTION_STAGE_CHAR_BUDGET,
+  CHATGPT_STAGED_MESSAGE_CHAR_BUDGET,
   CHATGPT_BIGGER_CONTEXT_PARTS,
   chatGptPromptJsonBytes,
   chatGptReadOnlyContextWarning,
@@ -435,7 +435,7 @@ test("Bigger Context compaction preserves history above the retired inline byte 
   // multipart — while every framed message stays inside the compaction stage budget.
   expect(framed.reduce((total, text) => total + chatGptPromptJsonBytes(text), 0))
     .toBeGreaterThan(CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET);
-  expect(Math.max(...framed.map(text => text.length))).toBeLessThanOrEqual(CHATGPT_COMPACTION_STAGE_CHAR_BUDGET);
+  expect(Math.max(...framed.map(text => text.length))).toBeLessThanOrEqual(CHATGPT_STAGED_MESSAGE_CHAR_BUDGET);
   const staged = multipart.multipart!.parts.join("\n");
   for (let index = 1; index <= 6; index += 1) {
     expect(staged).toContain(`multipart-history-${index}-`);

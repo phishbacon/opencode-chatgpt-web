@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   compileChatGptWebPrompt,
-  CHATGPT_COMPACTION_STAGE_CHAR_BUDGET,
+  CHATGPT_STAGED_MESSAGE_CHAR_BUDGET,
   CHATGPT_COMPACTION_TRANSACTION_TOKEN_BUDGET,
   type CompiledChatGptWebPrompt,
 } from "../src/adapters/chatgpt-web/prompt";
@@ -158,7 +158,7 @@ test("multipart compaction trims to the transaction budget with every stage insi
   expect(tokens).toBeGreaterThan(80_000);
   expect(tokens).toBeLessThan(CHATGPT_COMPACTION_TRANSACTION_TOKEN_BUDGET);
   const framed = compiledChatGptWebMessages(compiled);
-  expect(Math.max(...framed.map(message => message.length))).toBeLessThanOrEqual(CHATGPT_COMPACTION_STAGE_CHAR_BUDGET);
+  expect(Math.max(...framed.map(message => message.length))).toBeLessThanOrEqual(CHATGPT_STAGED_MESSAGE_CHAR_BUDGET);
   expect(compiled.multipart!.commit).toContain("earlier history items were omitted");
   expect(() => assertMultipartFits(compiled, parsed)).not.toThrow();
 });
@@ -175,7 +175,7 @@ test("ordinary multipart turns retain all history and fail preflight above the c
   expect(compiled.multipart!.parts.flatMap(part => JSON.parse(part).records)
     .filter(record => record.kind === "message").map(record => record.message.content))
     .toEqual(parsed.context.messages.map(message => message.content));
-  expect(() => assertMultipartFits(compiled, parsed)).toThrow("240,000-token six-part ceiling");
+  expect(() => assertMultipartFits(compiled, parsed)).toThrow("above the 80,000-character staged-message limit");
   expect(parsed).toEqual(before);
 });
 
@@ -223,7 +223,7 @@ test("multipart compaction drops an atomic record larger than a stage budget ins
   expect(estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId))
     .toBeLessThan(CHATGPT_COMPACTION_TRANSACTION_TOKEN_BUDGET);
   const framed = compiledChatGptWebMessages(compiled);
-  expect(Math.max(...framed.map(message => message.length))).toBeLessThanOrEqual(CHATGPT_COMPACTION_STAGE_CHAR_BUDGET);
+  expect(Math.max(...framed.map(message => message.length))).toBeLessThanOrEqual(CHATGPT_STAGED_MESSAGE_CHAR_BUDGET);
   expect(compiled.multipart!.parts.flatMap(part => JSON.parse(part).records)
     .filter(record => record.kind === "message").map(record => record.message.content))
     .toEqual(["checkpoint now"]);

@@ -196,14 +196,14 @@ test("multipart planning leaves room for final attachments and execution instruc
   ]) {
     const caps = { ...capabilities, proAvailable: scenario.proAvailable };
     const parsed = request("");
-    const texts = Array.from({ length: 36 }, (_, index) => `record ${index}: ${"word ".repeat(5_000)}`);
+    const texts = Array.from({ length: 36 }, (_, index) => `record ${index}: ${"word ".repeat(2_000)}`);
     parsed.context.messages = texts.map((content, index) => ({ role: "user", content, timestamp: index + 1 }));
     const images = Array.from({ length: scenario.images }, (_, index) => ({
       type: "image" as const, imageUrl: `data:image/png;base64,partition-image-${index}`, detail: "original" as const,
     }));
     if (images.length) parsed.context.messages.push({ role: "user", content: images, timestamp: 37 });
     if (scenario.schema) parsed.options.outputFormat = {
-      type: "json_schema", name: "result", strict: true, schema: { type: "string", description: "schema ".repeat(24_000) },
+      type: "json_schema", name: "result", strict: true, schema: { type: "string", description: "schema ".repeat(4_000) },
     };
     const compiled = compileChatGptWebPrompt(parsed, caps, undefined, { experimentalMultipartParts: 6 });
     const records = compiled.multipart!.parts.flatMap(part => JSON.parse(part).records);

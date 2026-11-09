@@ -214,16 +214,18 @@ export const CHATGPT_MAX_INPUT_IMAGES = 10;
 export const CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET = 110_000;
 
 /**
- * ChatGPT's composer has refused staged compaction messages far below the published transport
- * limits: a 124,697-character stage was toasted while the same account accepted larger stages
- * earlier the same day. Compaction only needs a summarizable prefix of the history, so every
- * staged message and the whole transaction stay well inside sizes ChatGPT has actually accepted,
- * trading omitted history for a submission that lands. The omitted-history note is already part
- * of the compaction contract, and these budgets apply only to compaction: ordinary Bigger
- * Context turns keep their full staging capacity.
+ * ChatGPT's composer has refused staged messages far below the published transport
+ * limits: a 124,697-character stage was toasted while the same account accepted larger
+ * stages earlier the same day, and a 148k-character stage was never acknowledged at all.
+ * Every staged message that has actually been accepted stayed inside this envelope, so
+ * preflight rejects anything larger before a browser turn can burn its stage budget in a
+ * retry loop, and compaction plans its parts and trims its history to fit it. Ordinary
+ * Bigger Context turns keep the published limits for part-count selection; this bound is
+ * what survives contact with ChatGPT. The transaction budget below is compaction-only:
+ * ordinary turns cannot drop history, so they fail toward compaction instead.
  */
-export const CHATGPT_COMPACTION_STAGE_CHAR_BUDGET = 80_000;
-export const CHATGPT_COMPACTION_STAGE_TOKEN_BUDGET = 28_000;
+export const CHATGPT_STAGED_MESSAGE_CHAR_BUDGET = 80_000;
+export const CHATGPT_STAGED_MESSAGE_TOKEN_BUDGET = 28_000;
 export const CHATGPT_COMPACTION_TRANSACTION_TOKEN_BUDGET = 140_000;
 
 export function chatGptPromptJsonBytes(text: string): number {
@@ -797,13 +799,12 @@ export function compileChatGptWebPrompt(
           const fixedMessage = final
             ? formatChatGptWebMultipartCommit(multipart, transactionId)
             : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!, multipartFlavor).text;
-          // Compaction targets the size ChatGPT has actually accepted, not the account's
-          // published transport limits; ordinary turns keep the full budgets above.
-          const charLimit = isOpenCodeCompactionRequest(parsed)
-            ? Math.min(limits.browserComposerCharLimit ?? Infinity, CHATGPT_COMPACTION_STAGE_CHAR_BUDGET)
-            : limits.browserComposerCharLimit ?? Infinity;
+          // ChatGPT's composer line does not care whose turn it is: every staged message
+          // shares the accepted char bound, while the token bound stays compaction-only so
+          // ordinary turns keep their published token budgets.
+          const charLimit = Math.min(limits.browserComposerCharLimit ?? Infinity, CHATGPT_STAGED_MESSAGE_CHAR_BUDGET);
           const framedTokenLimit = isOpenCodeCompactionRequest(parsed)
-            ? Math.min(tokenLimit, CHATGPT_COMPACTION_STAGE_TOKEN_BUDGET)
+            ? Math.min(tokenLimit, CHATGPT_STAGED_MESSAGE_TOKEN_BUDGET)
             : tokenLimit;
           const tokens = framedTokenLimit - estimateTokens(fixedMessage);
           const chars = charLimit - fixedMessage.length;
@@ -883,8 +884,8 @@ export function compileChatGptWebPrompt(
       const framed = final
         ? formatChatGptWebMultipartCommit(multipart, stagingTransactionId)
         : formatChatGptWebMultipartStage(payload, stagingTransactionId, index + 1, multipart.parts.length, multipart.flavor).text;
-      return framed.length > CHATGPT_COMPACTION_STAGE_CHAR_BUDGET
-        || estimateTokens(framed, parsed.modelId) > CHATGPT_COMPACTION_STAGE_TOKEN_BUDGET;
+      return framed.length > CHATGPT_STAGED_MESSAGE_CHAR_BUDGET
+        || estimateTokens(framed, parsed.modelId) > CHATGPT_STAGED_MESSAGE_TOKEN_BUDGET;
     });
   };
   const exceedsCompactionBudget = (): boolean => compiled.multipart

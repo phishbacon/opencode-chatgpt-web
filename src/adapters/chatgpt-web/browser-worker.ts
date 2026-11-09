@@ -45,6 +45,8 @@ import {
 } from "./input-tokens";
 import {
   CHATGPT_MAX_INPUT_IMAGES,
+  CHATGPT_STAGED_MESSAGE_CHAR_BUDGET,
+  CHATGPT_STAGED_MESSAGE_TOKEN_BUDGET,
   formatChatGptWebMultipartCommit,
   formatChatGptWebMultipartStage,
   isChatGptWebMultipartPartCount,
@@ -842,6 +844,22 @@ export function assertChatGptWebMultipartInputWithinLimits(
   }
   if (!supportsChatGptWebBiggerContext(modelId, effort, modelFamily)) {
     throw new Error(CHATGPT_WEB_GPT6_INSTANT_BIGGER_CONTEXT_ERROR);
+  }
+  // ChatGPT's composer has refused staged messages well below the published limits above:
+  // the rejection is client-side, the model never acknowledges, and the caller retries the
+  // doomed submission until its stage budget burns out. Everything ChatGPT has actually
+  // accepted for these models stayed inside this char envelope (the token axis was never
+  // independently rejected — a 44k-token dense message was accepted), so fail toward
+  // compaction before any browser turn. Luna keeps its own measured Free-plan budget: it
+  // cannot /compact, so its transport bound is the only bound it has.
+  if (modelId !== CHATGPT_WEB_LUNA_MODEL_ID && transport && (
+    transport.maxStageChars > CHATGPT_STAGED_MESSAGE_CHAR_BUDGET
+    || transport.finalMessageChars > CHATGPT_STAGED_MESSAGE_CHAR_BUDGET
+  )) {
+    throw new ChatGptWebAdapterError(
+      `A staged ChatGPT message needs up to ${Math.max(transport.maxStageChars, transport.finalMessageChars).toLocaleString("en-US")} characters, above the ${CHATGPT_STAGED_MESSAGE_CHAR_BUDGET.toLocaleString("en-US")}-character staged-message limit ChatGPT currently accepts. Run /compact so every staged message fits, then retry.`,
+      { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+    );
   }
   const baseContextWindow = resolveChatGptWebMessageTokenBudget(modelId, effort, capabilities)
     + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1;
