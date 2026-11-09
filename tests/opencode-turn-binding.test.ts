@@ -159,7 +159,7 @@ describe("OpenCode turn ownership", () => {
     const f = fixture();
     f.begin();
     const signed = f.sign();
-    f.advance(120_000);
+    f.advance(600_000);
     expect(() => f.verify(signed)).toThrow("expired or is from the future");
     const future = fixture();
     future.begin();

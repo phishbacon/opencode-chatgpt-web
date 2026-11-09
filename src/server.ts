@@ -781,6 +781,11 @@ export async function responseRequest(
       // No await occurs between this commit and browser ownership assignment.
       verifyOpenCodeResponsesIngress(req, raw, options.openCodeTurnVerifier,
         { receipts: options.openCodeToolReceipts });
+      console.info(`[chatgpt-web] opencode_ingress_accepted ${JSON.stringify({
+        sessionID: verifiedOpenCodeTurn.sessionID,
+        purpose: verifiedOpenCodeTurn.purpose ?? null,
+        model: verifiedOpenCodeTurn.model,
+      })}`);
       options.onOpenCodeSession?.(verifiedOpenCodeTurn.sessionID, verifiedOpenCodeTurn.owner);
       options.onTurnIdentity?.({ threadId: verifiedOpenCodeTurn.sessionID, turnId: verifiedOpenCodeTurn.turnNonce });
     } else {
@@ -794,6 +799,7 @@ export async function responseRequest(
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }
   if (parsed._opaqueMultiAgentV2Payload) {
+    logRejection(new Error("ChatGPT Web cannot read the encrypted cross-backend subagent payload"));
     return formatErrorResponse(
       400,
       "invalid_request_error",
@@ -802,6 +808,7 @@ export async function responseRequest(
     );
   }
   if (typeof requestedPreviousResponseId === "string" && expanded === raw) {
+    logRejection(new Error("Local continuation state for previous_response_id is unavailable"));
     return formatErrorResponse(
       409,
       "invalid_request_error",

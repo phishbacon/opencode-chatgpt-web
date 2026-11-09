@@ -450,7 +450,7 @@ export class ChatGptSubmissionRejectionObserver {
   private readonly requests = new Set<Request>();
   private readonly streams = new Map<Request, Response>();
   private checks: Array<Promise<ChatGptWebAdapterError | undefined>> = [];
-  private alertBaseline?: JSHandle<{ hasNewSizeError(): boolean }>;
+  private alertBaseline?: JSHandle<{ hasNewSizeError(): boolean; anySizeError(): boolean }>;
   private sawOwnedRequest = false;
   private alertFailure?: ChatGptWebAdapterError;
 
@@ -544,7 +544,10 @@ export class ChatGptSubmissionRejectionObserver {
           && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
           && /^The message you submitted was too long(?:, please edit it and resubmit)?\.$/.test(element.innerText.trim()));
       const initial = new WeakSet(errors());
-      return { hasNewSizeError: () => errors().some(element => !initial.has(element)) };
+      return {
+        hasNewSizeError: () => errors().some(element => !initial.has(element)),
+        anySizeError: () => errors().length > 0,
+      };
     });
     if (generation !== this.generation) { await baseline.dispose(); return; }
     this.alertBaseline = baseline;
@@ -575,6 +578,37 @@ export class ChatGptSubmissionRejectionObserver {
       }
     }
     return this.alertFailure;
+  }
+
+  /**
+   * Classify an acknowledgement stall from the live page instead of the baseline. A composer
+   * size rejection never reaches the network: the Send renders a user turn, the toast appears,
+   * and the model never acknowledges. Every visible alert is logged so a changed ChatGPT
+   * wording stays diagnosable even when it no longer matches the known sentence.
+   */
+  async liveSizeRejection(): Promise<ChatGptWebAdapterError | undefined> {
+    if (!this.page) return undefined;
+    const generation = this.generation;
+    try {
+      const observed = await withChatGptBrowserObservationTimeout(this.page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('[role="alert"]')]
+          .filter(element => !element.closest('.markdown, [data-turn-key], [data-turn-id-container], [data-message-author-role], [data-user-message-bubble], [contenteditable="true"]')
+            && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
+          .map(element => element.innerText.trim().replace(/\s+/g, " ")),
+      ), 3_000).catch(() => [] as string[]);
+      if (generation !== this.generation) return undefined;
+      const visible = observed.some(text => /^The message you submitted was too long/i.test(text));
+      if (observed.length > 0) {
+        console.info(`[chatgpt-web] size_rejection_probe ${JSON.stringify({ visible, observed })}`);
+      }
+      if (!visible) return undefined;
+      this.alertFailure ??= this.sizeError();
+      this.onRejected?.(this.alertFailure);
+      console.info(`[chatgpt-web] size_rejection_classified ${JSON.stringify({ generation: this.generation })}`);
+      return this.alertFailure;
+    } catch {
+      return undefined;
+    }
   }
 
   /** An owned successful conversation stream is still open, even if Stop is absent. */
@@ -5261,47 +5295,78 @@ export class ChatGptBrowserWorker {
           console.info(
             `[chatgpt-web] browser turn ${turn.traceId} multipart part ${index + 1}/${prepared.multipart.parts.length} submission accepted evidence=${evidence}`,
           );
-          const acknowledgedResponse = await this.runStage(
-            turn.traceId,
-            `multipart_stage_${index + 1}_acknowledgement`,
-            browserStageTimeouts.multipartStageAcknowledgement,
-            async (stageSignal) => {
-              const acknowledgementSignal = turn.abortSignal
-                ? AbortSignal.any([stageSignal, turn.abortSignal])
-                : stageSignal;
-              const responseTurn = await this.waitForNewAssistantTurn(
-                page,
-                stageBaseline,
-                deadline,
-                acknowledgementSignal,
-                // A part still being ingested has produced no MCP activity, so there is no progress
-                // to consult here; the dedicated acknowledgement stage owns this wait.
-                undefined,
-                CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS,
-                undefined,
-                launcherObservationRecovery
-                  ? async (...args) => {
-                    const recovered = await recoverAssistantObservation(...args);
-                    stageBaseline = recovered.baseline;
-                    return recovered;
-                  }
-                  : undefined,
-                generation,
-              );
-              return this.waitForMultipartAcknowledgement(
-                page,
-                responseTurn,
-                stageBaseline,
-                stage,
-                deadline,
-                acknowledgementSignal,
-                turn.externalProgress,
-                undefined,
-                generation,
-              );
-            },
-            chatGptSuspensionClock,
-          );
+          const acknowledgedResponse = await (async () => {
+            let polling = true;
+            // A composer size rejection never reaches the network: the Send renders a user turn,
+            // the toast appears, and the model never acknowledges. Poll the live page during the
+            // wait so the turn dies seconds after the toast instead of burning the whole stage
+            // budget — OpenCode dispatches its prompt-signed compaction binding right behind this
+            // failure, and that binding must still be inside its request age when it arrives.
+            const sizeStall = (async () => {
+              while (polling) {
+                await new Promise(resolve => setTimeout(resolve, 3_000));
+                if (!polling) break;
+                const rejection = await submissionRejection.liveSizeRejection();
+                if (rejection) throw rejection;
+              }
+            })();
+            const acknowledgement = this.runStage(
+              turn.traceId,
+              `multipart_stage_${index + 1}_acknowledgement`,
+              browserStageTimeouts.multipartStageAcknowledgement,
+              async (stageSignal) => {
+                const acknowledgementSignal = turn.abortSignal
+                  ? AbortSignal.any([stageSignal, turn.abortSignal])
+                  : stageSignal;
+                const responseTurn = await this.waitForNewAssistantTurn(
+                  page,
+                  stageBaseline,
+                  deadline,
+                  acknowledgementSignal,
+                  // A part still being ingested has produced no MCP activity, so there is no progress
+                  // to consult here; the dedicated acknowledgement stage owns this wait.
+                  undefined,
+                  CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS,
+                  undefined,
+                  launcherObservationRecovery
+                    ? async (...args) => {
+                      const recovered = await recoverAssistantObservation(...args);
+                      stageBaseline = recovered.baseline;
+                      return recovered;
+                    }
+                    : undefined,
+                  generation,
+                );
+                return this.waitForMultipartAcknowledgement(
+                  page,
+                  responseTurn,
+                  stageBaseline,
+                  stage,
+                  deadline,
+                  acknowledgementSignal,
+                  turn.externalProgress,
+                  undefined,
+                  generation,
+                );
+              },
+              chatGptSuspensionClock,
+            );
+            // An acknowledgement that loses the race below keeps waiting until the turn tears
+            // it down; its late rejection must not surface as an unhandled rejection.
+            acknowledgement.catch(() => {});
+            try {
+              // sizeStall settles only after polling flips false, so the race ends on the
+              // acknowledgement or on the stall's thrown size rejection.
+              const value = await Promise.race([acknowledgement, sizeStall]);
+              return value as Awaited<typeof acknowledgement>;
+            } catch (error) {
+              const stalled = await submissionRejection.liveSizeRejection();
+              if (stalled) throw stalled;
+              throw error;
+            } finally {
+              polling = false;
+            }
+          })();
           const stageRejection = await submissionRejection.failure();
           if (stageRejection) throw stageRejection;
           acknowledgedStages.push({

@@ -21,6 +21,25 @@ test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("a new service size alert sur
   } finally { observer.dispose(); await browser.close(); }
 }, 20_000);
 
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("a stalled acknowledgement classifies a size alert the baseline recorded as stale", async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  const observer = new ChatGptSubmissionRejectionObserver();
+  try {
+    const page = await browser.newPage();
+    await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: `<main><aside role="alert">${tooLong}</aside></main>` }));
+    await page.goto("https://chatgpt.com/c/fixture");
+    observer.begin(page);
+    await observer.captureAlertBaseline();
+    await page.evaluate(async () => { await fetch("/backend-api/f/conversation", { method: "POST" }); });
+    // The alert predates this send, so the baseline-relative check never claims it...
+    expect(await observer.failure()).toBeUndefined();
+    // ...but an acknowledgement stall consults the live page and classifies it anyway.
+    expect(await observer.liveSizeRejection()).toMatchObject({ code: "context_length_exceeded", retryable: false });
+    // The classification is committed for every later failure() check in the turn.
+    expect(await observer.failure()).toMatchObject({ code: "context_length_exceeded" });
+  } finally { observer.dispose(); await browser.close(); }
+}, 20_000);
+
 test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("size alerts require a current owned Send and exclude history, quoted text and hidden UI", async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
   const failures: unknown[] = [];

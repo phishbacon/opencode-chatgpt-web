@@ -15,7 +15,12 @@ import { dirname, isAbsolute, resolve } from "node:path";
 
 const HEADER_VERSION = 2;
 const MAX_ENVELOPE_LENGTH = 2048;
-const MAX_REQUEST_AGE_MS = 2 * 60_000;
+// OpenCode signs the compaction binding at prompt time and may dispatch it only after the
+// primary turn dies; ChatGPT's client-side size rejection lets a primary run for minutes
+// before its acknowledgement stage fails, and a two-minute age expired the recovery binding
+// every time. Signatures stay one-shot (request nonce), turn- and epoch-bound, and only
+// travel the localhost bridge, so the wider age costs little and unblocks the recovery path.
+const MAX_REQUEST_AGE_MS = 10 * 60_000;
 /** OpenCode re-sends its one prepared compaction header when a shrink-retry follows an
  *  overflow rejection. Re-serving that read-only request briefly is safe; primaries stay one-shot. */
 const COMPACTION_RETRY_WINDOW_MS = 60_000;
