@@ -15,6 +15,10 @@ jobs:
       matrix:
         os: [macos-15, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # verify.ts already bounds every step with its own watchdog; this is the backstop
+    # for a job that wedges outside verify (packaging, smoke) instead of burning the
+    # full six-hour GitHub default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - name: Validate launcher installer with Windows PowerShell 5.1

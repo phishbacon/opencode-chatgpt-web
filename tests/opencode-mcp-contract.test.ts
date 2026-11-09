@@ -47,6 +47,44 @@ function environment(origin?: "opencode", extraTools: ChatGptTurnEnvironment["to
   };
 }
 
+// bun 1.4.x on Windows can lose pipe data events when a test body resumes inside a libuv
+// read callback (oven-sh/bun#45473): an untimed await then hangs forever and the per-test
+// timeout never fires because the matcher's nested event loop blocks the test deadline.
+// Every broker wait in this file is therefore bounded and every pipe promise is awaited
+// plainly instead of through expect().resolves/.rejects.
+const BROKER_WAIT_MS = 10_000;
+
+async function withDeadline<T>(promise: Promise<T>, label = "broker wait"): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} exceeded ${BROKER_WAIT_MS}ms (bun#45473 Windows pipe stall)`)),
+          BROKER_WAIT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function expectRejection(promise: Promise<unknown>, message: string): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    expect((error as Error).message).toContain(message);
+    return;
+  }
+  throw new Error(`expected a rejection containing: ${message}`);
+}
+
+async function deliver(...args: Parameters<typeof deliverOpenCodeToolResult>): Promise<void> {
+  await withDeadline(deliverOpenCodeToolResult(...args));
+}
+
 let sequence = 0;
 async function fixture(contract: "native" | "opencode" = "opencode", spawnEnv: Record<string, string> = {}) {
   const endpointName = `oc-mcp-${process.pid}-${++sequence}`;
@@ -66,8 +104,8 @@ async function fixture(contract: "native" | "opencode" = "opencode", spawnEnv: R
   const client = new Client({ name: "opencode-website-contract-test", version: "1" });
   const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
   const close = async () => {
-    await client.close().catch(() => {});
-    await broker.close();
+    await withDeadline(client.close().catch(() => {}), "fixture client close");
+    await withDeadline(broker.close(), "fixture broker close");
   };
   let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -143,25 +181,25 @@ describe("OpenCode website MCP contract", () => {
         method: "claim", contract: "opencode", token, activityId: activeActivityId,
       });
       expect(retry.bindingId).toBe(first.bindingId);
-      await expect(callTurnBroker(socketPath, {
+      await expectRejection(callTurnBroker(socketPath, {
         method: "claim", contract: "opencode", token, activityId: "activity_new_0000000000000001",
-      })).rejects.toThrow("turn activity capacity exceeded");
-      await expect(callTurnBroker(socketPath, {
+      }), "turn activity capacity exceeded");
+      await expectRejection(callTurnBroker(socketPath, {
         method: "activity_complete", token, activityId: "activity_missing_0000000000000001",
-      })).rejects.toThrow("turn activity capacity exceeded");
+      }), "turn activity capacity exceeded");
 
-      await expect(callTurnBroker<{ completed: boolean }>(socketPath, {
+      expect(await callTurnBroker<{ completed: boolean }>(socketPath, {
         method: "activity_complete", token, activityId: activeActivityId,
-      })).resolves.toEqual({ completed: true });
-      await expect(callTurnBroker(socketPath, {
+      })).toEqual({ completed: true });
+      expect(await callTurnBroker<{ completed: boolean; duplicate: boolean }>(socketPath, {
         method: "activity_complete", token, activityId: activeActivityId,
-      })).resolves.toEqual({ completed: false, duplicate: true });
-      await expect(callTurnBroker(socketPath, {
+      })).toEqual({ completed: false, duplicate: true });
+      await expectRejection(callTurnBroker(socketPath, {
         method: "claim", contract: "opencode", token, activityId: "activity_after_0000000000000001",
-      })).rejects.toThrow("turn activity capacity exceeded");
+      }), "turn activity capacity exceeded");
     } finally {
       broker.revoke(token);
-      await broker.close();
+      await withDeadline(broker.close());
     }
   }, 30_000);
 
@@ -175,7 +213,7 @@ describe("OpenCode website MCP contract", () => {
       const second = f.call("opencode_tool_call", {
         turn_token: token, wire_name: "read", arguments: { filePath: "note.txt" },
       });
-      const batch = await f.broker.nextToolBatch(token);
+      const batch = await withDeadline(f.broker.nextToolBatch(token));
       expect(batch).toHaveLength(2);
       expect(batch.map(tool => ({ name: tool.wireName, args: tool.arguments, freeform: tool.freeform }))).toEqual([
         { name: "shell", args: { command: "pwd" }, freeform: false },
@@ -189,7 +227,7 @@ describe("OpenCode website MCP contract", () => {
 
       const freeform = f.call("opencode_tool_call", { turn_token: token, wire_name: "patch", input: "*** patch ***" });
       const outcome = await Promise.race([
-        f.broker.nextToolBatch(token).then(batch => ({ kind: "dispatched" as const, batch })),
+        withDeadline(f.broker.nextToolBatch(token)).then(batch => ({ kind: "dispatched" as const, batch })),
         freeform.then(response => ({ kind: "preflight" as const, response })),
       ]);
       if (outcome.kind === "preflight") throw new Error(`Freeform request was rejected before broker dispatch: ${JSON.stringify(outcome.response)}`);
@@ -211,19 +249,21 @@ describe("OpenCode website MCP contract", () => {
       const website = f.call("opencode_tool_call", {
         turn_token: token, wire_name: "shell", arguments: { command: "echo once" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       const result = { content: [{ type: "text", text: "ran once" }] };
       const remote = new RemoteTurnBroker(f.broker.socketPath);
       // Simulate a lost owner_complete response after the broker committed the result.
-      await remote.completeTool(token, request!.callId, result);
-      await expect(remote.completeTool(token, request!.callId, result)).resolves.toBeUndefined();
-      await expect(remote.completeTool(token, request!.callId, { content: [{ type: "text", text: "different" }] }))
-        .rejects.toThrow("previously completed OpenCode tool result changed");
-      await expect(remote.completeTool(otherToken, request!.callId, result)).rejects.toThrow("not pending");
-      await expect(remote.completeTool(token, "call_not_issued", result)).rejects.toThrow("not pending");
+      await withDeadline(remote.completeTool(token, request!.callId, result), "completeTool");
+      expect(await withDeadline(remote.completeTool(token, request!.callId, result), "completeTool")).toBeUndefined();
+      await expectRejection(withDeadline(
+        remote.completeTool(token, request!.callId, { content: [{ type: "text", text: "different" }] }),
+        "completeTool",
+      ), "previously completed OpenCode tool result changed");
+      await expectRejection(withDeadline(remote.completeTool(otherToken, request!.callId, result), "completeTool"), "not pending");
+      await expectRejection(withDeadline(remote.completeTool(token, "call_not_issued", result), "completeTool"), "not pending");
       expect((await website).content).toEqual(result.content);
       f.broker.revoke(token);
-      await expect(remote.completeTool(token, request!.callId, result)).rejects.toThrow("invalid or expired");
+      await expectRejection(withDeadline(remote.completeTool(token, request!.callId, result), "completeTool"), "invalid or expired");
     } finally {
       f.broker.revoke(token);
       f.broker.revoke(otherToken);
@@ -241,7 +281,7 @@ describe("OpenCode website MCP contract", () => {
       const websiteSecond = f.call("opencode_tool_call", {
         turn_token: token, wire_name: "read", arguments: { filePath: "note.txt" },
       });
-      const batch = await f.broker.nextToolBatch(token);
+      const batch = await withDeadline(f.broker.nextToolBatch(token));
       expect(batch).toHaveLength(2);
       const remote = new RemoteTurnBroker(f.broker.socketPath);
       const complete = remote.completeTool.bind(remote);
@@ -256,7 +296,7 @@ describe("OpenCode website MCP contract", () => {
         }
       };
       for (const request of batch) {
-        await deliverOpenCodeToolResult(remote, token, request.callId, {
+        await deliver(remote, token, request.callId, {
           content: [{ type: "text", text: request.wireName }],
         });
       }
@@ -292,8 +332,8 @@ describe("OpenCode website MCP contract", () => {
       const website = f.call("opencode_tool_call", {
         turn_token: token, wire_name: "shell", arguments: { command: "echo once" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
-      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
+      await deliver(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
         content: [{ type: "text", text: "executed once" }],
       });
       expect(acknowledgmentsDropped).toBe(1);
@@ -312,7 +352,7 @@ describe("OpenCode website MCP contract", () => {
       const website = f.call("codex_tool_call", {
         turn_token: token, wire_name: "shell", arguments: { command: "pwd" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       const result = { content: [{ type: "text", text: "done" }] };
       f.broker.completeTool(token, request!.callId, result);
       expect(() => f.broker.completeTool(token, request!.callId, result)).toThrow("not pending");
@@ -391,7 +431,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: secondToken, wire_name: "read", arguments: { filePath: "note.txt" },
       });
       const [firstBatch, secondBatch] = await Promise.all([
-        f.broker.nextToolBatch(firstToken), f.broker.nextToolBatch(secondToken),
+        withDeadline(f.broker.nextToolBatch(firstToken)), withDeadline(f.broker.nextToolBatch(secondToken)),
       ]);
       expect(firstBatch).toHaveLength(1);
       expect(firstBatch[0]?.wireName).toBe("shell");
@@ -439,7 +479,7 @@ describe("OpenCode website MCP contract", () => {
       const website = f.call("opencode_tool_call", {
         turn_token: token, wire_name: "shell", arguments: { command: "echo finished" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       expect(request?.wireName).toBe("shell");
       await Bun.sleep(40);
       f.broker.completeTool(token, request!.callId, {
@@ -465,7 +505,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Trace a thing", prompt: "Find the root cause" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       expect(request?.wireName).toBe("subagent");
       const handle = (await started).structuredContent as { status?: string; id?: string };
       expect(handle.status).toBe("running");
@@ -473,7 +513,7 @@ describe("OpenCode website MCP contract", () => {
       const stillRunning = await f.call("opencode_subagent_wait", { turn_token: token, id: handle.id! });
       expect(stillRunning.isError).toBeUndefined();
       expect(stillRunning.structuredContent).toMatchObject({ status: "running", id: handle.id! });
-      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+      await deliver(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
         content: [{ type: "text", text: "child finished" }],
         structuredContent: { sessionID: "ses_child123", status: "completed", output: "child finished" },
       });
@@ -497,8 +537,8 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Fast thing", prompt: "Finish quickly" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
-      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
+      await deliver(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
         content: [{ type: "text", text: "fast" }],
         structuredContent: { sessionID: "ses_child456", status: "completed", output: "fast" },
       });
@@ -525,7 +565,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Second trace", prompt: "Trace the click handler" },
       });
-      const batch = await f.broker.nextToolBatch(token);
+      const batch = await withDeadline(f.broker.nextToolBatch(token));
       expect(batch).toHaveLength(2);
       const [one, two] = batch;
       expect(one!.callId).not.toBe(two!.callId);
@@ -533,7 +573,7 @@ describe("OpenCode website MCP contract", () => {
       const runningFirst = await f.call("opencode_subagent_wait", { turn_token: token, id: one!.callId });
       expect(runningFirst.structuredContent).toMatchObject({ status: "running", id: one!.callId });
       // Results arrive in reverse order; each collect resolves only its own id.
-      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, two!.callId, {
+      await deliver(new RemoteTurnBroker(f.broker.socketPath), token, two!.callId, {
         content: [{ type: "text", text: "second done" }],
       });
       const secondDone = await f.call("opencode_subagent_wait", { turn_token: token, id: two!.callId });
@@ -541,7 +581,7 @@ describe("OpenCode website MCP contract", () => {
       expect(secondDone.content).toEqual([{ type: "text", text: "second done" }]);
       expect((await f.call("opencode_subagent_wait", { turn_token: token, id: one!.callId })).structuredContent)
         .toMatchObject({ status: "running" });
-      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, one!.callId, {
+      await deliver(new RemoteTurnBroker(f.broker.socketPath), token, one!.callId, {
         content: [{ type: "text", text: "first done" }],
       });
       const firstDone = await f.call("opencode_subagent_wait", { turn_token: token, id: one!.callId });
@@ -564,7 +604,7 @@ describe("OpenCode website MCP contract", () => {
     try {
       const args = { agent: "explore", description: "Duplicate probe", prompt: "Investigate the duplicate guard" };
       const first = f.call("opencode_tool_call", { turn_token: token, wire_name: "subagent", arguments: args });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       expect(((await first).structuredContent as { id?: string }).id).toBe(request!.callId);
       const duplicate = f.call("opencode_tool_call", { turn_token: token, wire_name: "subagent", arguments: { ...args } });
       expect(((await duplicate).structuredContent as { id?: string }).id).toBe(request!.callId);
@@ -591,7 +631,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Background probe", prompt: "Run detached", background: true },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       expect(request?.arguments).not.toHaveProperty("background");
       expect(request?.arguments).toMatchObject({
         agent: "explore", description: "Background probe", prompt: "Run detached",
@@ -618,7 +658,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Doomed", prompt: "Will be revoked" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       await started;
       f.broker.revoke(token);
       const afterRetire = await f.call("opencode_subagent_wait", { turn_token: token, id: request!.callId });
@@ -642,7 +682,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Hung child", prompt: "Never finishes" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       await started;
       const before = await f.call("opencode_subagent_wait", { turn_token: token, id: request!.callId });
       expect(before.structuredContent).toMatchObject({ status: "running" });
@@ -691,7 +731,7 @@ describe("OpenCode website MCP contract", () => {
         turn_token: token, wire_name: "subagent",
         arguments: { agent: "explore", description: "Hold", prompt: "Hold the turn open" },
       });
-      const [request] = await f.broker.nextToolBatch(token);
+      const [request] = await withDeadline(f.broker.nextToolBatch(token));
       expect(((await spawned).structuredContent as { status?: string }).status).toBe("running");
       // OpenCode is blocked on the subagent: any other tool would queue past the
       // transport deadline and retire the turn, so it is rejected explicitly.
@@ -702,13 +742,13 @@ describe("OpenCode website MCP contract", () => {
       expect((blocked.content as Array<{ text: string }>)[0]!.text).toContain("opencode_subagent_wait");
       // The turn binding survives the rejection, and once the subagent's result
       // lands the normal tool path works again.
-      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+      await deliver(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
         content: [{ type: "text", text: "done" }],
       });
       const shell = f.call("opencode_tool_call", {
         turn_token: token, wire_name: "shell", arguments: { command: "echo ok" },
       });
-      const [shellRequest] = await f.broker.nextToolBatch(token);
+      const [shellRequest] = await withDeadline(f.broker.nextToolBatch(token));
       expect(shellRequest?.wireName).toBe("shell");
       f.broker.completeTool(token, shellRequest!.callId, { content: [{ type: "text", text: "ok" }] });
       expect((await shell).content).toEqual([{ type: "text", text: "ok" }]);
