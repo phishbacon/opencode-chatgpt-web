@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from "./../src/branding";
 import { expect, test } from "bun:test";
 import {
   CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET,
+  CHATGPT_COMPACTION_STAGE_CHAR_BUDGET,
   CHATGPT_BIGGER_CONTEXT_PARTS,
   chatGptPromptJsonBytes,
   chatGptReadOnlyContextWarning,
@@ -411,7 +412,7 @@ test("Bigger Context compaction preserves history above the retired inline byte 
   compact.context.systemPrompt = [];
   compact.context.messages = Array.from({ length: 6 }, (_unused, index) => ({
     role: "user" as const,
-    content: `multipart-history-${index + 1}-${String.fromCharCode(97 + index).repeat(160_000)}`,
+    content: `multipart-history-${index + 1}-${String.fromCharCode(97 + index).repeat(60_000)}`,
     timestamp: index + 1,
   }));
 
@@ -425,10 +426,16 @@ test("Bigger Context compaction preserves history above the retired inline byte 
   expect(multipart.trimmedCompactionMessages).toBeUndefined();
   expect(multipart.multipart?.parts).toHaveLength(6);
   const transactionId = `ctx_${"0".repeat(32)}`;
-  const stageBytes = multipart.multipart!.parts.map((payload, index) => chatGptPromptJsonBytes(
-    formatChatGptWebMultipartStage(payload, transactionId, index + 1).text,
+  const framed = multipart.multipart!.parts.map((payload, index) => (
+    index === multipart.multipart!.parts.length - 1
+      ? formatChatGptWebMultipartCommit(multipart.multipart!, transactionId)
+      : formatChatGptWebMultipartStage(payload, transactionId, index + 1).text
   ));
-  expect(Math.max(...stageBytes)).toBeGreaterThan(CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET);
+  // The payload collectively outgrows the retired inline byte budget — that is why it rides
+  // multipart — while every framed message stays inside the compaction stage budget.
+  expect(framed.reduce((total, text) => total + chatGptPromptJsonBytes(text), 0))
+    .toBeGreaterThan(CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET);
+  expect(Math.max(...framed.map(text => text.length))).toBeLessThanOrEqual(CHATGPT_COMPACTION_STAGE_CHAR_BUDGET);
   const staged = multipart.multipart!.parts.join("\n");
   for (let index = 1; index <= 6; index += 1) {
     expect(staged).toContain(`multipart-history-${index}-`);
@@ -442,7 +449,7 @@ test("Bigger Context keeps preliminary parts small and preserves all records in 
   compact.context.messages = [
     ...Array.from({ length: 6 }, (_unused, index) => ({
       role: "user" as const,
-      content: `history-${index}-${"x".repeat(100_000)}`,
+      content: `history-${index}-${"x".repeat(70_000)}`,
       timestamp: index + 1,
     })),
     { role: "user", content: "compact now", timestamp: 7 },

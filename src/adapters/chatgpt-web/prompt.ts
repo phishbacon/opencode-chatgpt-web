@@ -213,8 +213,30 @@ export const CHATGPT_MAX_INPUT_IMAGES = 10;
  */
 export const CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET = 110_000;
 
+/**
+ * ChatGPT's composer has refused staged compaction messages far below the published transport
+ * limits: a 124,697-character stage was toasted while the same account accepted larger stages
+ * earlier the same day. Compaction only needs a summarizable prefix of the history, so every
+ * staged message and the whole transaction stay well inside sizes ChatGPT has actually accepted,
+ * trading omitted history for a submission that lands. The omitted-history note is already part
+ * of the compaction contract, and these budgets apply only to compaction: ordinary Bigger
+ * Context turns keep their full staging capacity.
+ */
+export const CHATGPT_COMPACTION_STAGE_CHAR_BUDGET = 80_000;
+export const CHATGPT_COMPACTION_STAGE_TOKEN_BUDGET = 28_000;
+export const CHATGPT_COMPACTION_TRANSACTION_TOKEN_BUDGET = 140_000;
+
 export function chatGptPromptJsonBytes(text: string): number {
   return Buffer.byteLength(JSON.stringify(text), "utf8");
+}
+
+/**
+ * OpenCode's compaction provider request carries its marker in the signed claims purpose,
+ * not in request metadata (the parser's _compactionRequest stays false for it), while the
+ * budgets and trim loop must treat both shapes as compaction.
+ */
+function isOpenCodeCompactionRequest(parsed: CodexParsedRequest): boolean {
+  return parsed._compactionRequest === true || parsed._openCodeTurn?.purpose === "compaction";
 }
 
 const DROPPED_IMAGE_NOTE =
@@ -710,7 +732,7 @@ export function compileChatGptWebPrompt(
     ] : [];
     const attachments = {
       ...(skillFiles.length ? { skillFiles } : {}),
-      ...(mode.localTools && !manualControl && !parsed._compactionRequest ? { turnToken } : {}),
+      ...(mode.localTools && !manualControl && !isOpenCodeCompactionRequest(parsed) ? { turnToken } : {}),
       ...(options?.includeContextTokenBreakdown
         ? { contextTokenBreakdown: contextTokenBreakdown(system, messages, multipartEnabled, multipartFlavor) }
         : {}),
@@ -775,15 +797,23 @@ export function compileChatGptWebPrompt(
           const fixedMessage = final
             ? formatChatGptWebMultipartCommit(multipart, transactionId)
             : formatChatGptWebMultipartStage(payload, transactionId, index + 1, multipartParts!, multipartFlavor).text;
-          const tokens = tokenLimit - estimateTokens(fixedMessage);
-          const chars = (limits.browserComposerCharLimit ?? Infinity) - fixedMessage.length;
+          // Compaction targets the size ChatGPT has actually accepted, not the account's
+          // published transport limits; ordinary turns keep the full budgets above.
+          const charLimit = isOpenCodeCompactionRequest(parsed)
+            ? Math.min(limits.browserComposerCharLimit ?? Infinity, CHATGPT_COMPACTION_STAGE_CHAR_BUDGET)
+            : limits.browserComposerCharLimit ?? Infinity;
+          const framedTokenLimit = isOpenCodeCompactionRequest(parsed)
+            ? Math.min(tokenLimit, CHATGPT_COMPACTION_STAGE_TOKEN_BUDGET)
+            : tokenLimit;
+          const tokens = framedTokenLimit - estimateTokens(fixedMessage);
+          const chars = charLimit - fixedMessage.length;
           if (tokens <= 0 || chars <= 0) {
             throw new ChatGptWebAdapterError(
               `The Bigger Context ${final ? "final part's instructions and attachments" : "stage wrapper"} exceed the available message budget before any task history is added. Reduce those inputs before retrying.`,
               { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
             );
           }
-          return { tokens, chars, tokenLimit, charLimit: limits.browserComposerCharLimit ?? Infinity };
+          return { tokens, chars, tokenLimit: framedTokenLimit, charLimit };
         });
         multipart.parts = partitionMultipartContext(records, multipartParts!, budgets, multipartFlavor);
         if (stagingEfforts.length > 1 && stagingEffort === "low" && multipart.parts.some((payload, index) => {
@@ -829,20 +859,37 @@ export function compileChatGptWebPrompt(
     ));
   const initialMessageCount = sourceMessages.length;
   let compiled = build(sourceMessages);
-  if (!parsed._compactionRequest) return compiled;
+  if (!isOpenCodeCompactionRequest(parsed)) return compiled;
 
   // Match browser-worker's exclusive transaction ceiling, including wrappers, acknowledgements,
   // attachments and the platform reserve. The legacy inline byte cap does not apply to multipart.
   // Individual records remain atomic; browser preflight still rejects any part that cannot fit.
   const multipartTokenBudget = compiled.multipart ? Math.min(
+    CHATGPT_COMPACTION_TRANSACTION_TOKEN_BUDGET,
     resolveChatGptWebContextLimits(
       backendModel, mode.effort, { ...capabilities, experimentalBiggerContext: true }, parsed._chatgptModelFamily,
     ).contextWindow,
     (resolveChatGptWebMessageTokenBudget(backendModel, mode.effort, capabilities)
       + CHATGPT_WEB_PLATFORM_RESERVE_TOKENS + 1) * compiled.multipart.parts.length,
   ) : undefined;
+  // Atomic records can force one framed message past the compaction stage budgets even when the
+  // transaction total fits, so the trim loop keeps dropping history until both bounds hold.
+  const stagingTransactionId = `ctx_${"0".repeat(32)}`;
+  const exceedsStageBudget = (): boolean => {
+    const multipart = compiled.multipart;
+    if (!multipart) return false;
+    return multipart.parts.some((payload, index) => {
+      const final = index === multipart.parts.length - 1;
+      const framed = final
+        ? formatChatGptWebMultipartCommit(multipart, stagingTransactionId)
+        : formatChatGptWebMultipartStage(payload, stagingTransactionId, index + 1, multipart.parts.length, multipart.flavor).text;
+      return framed.length > CHATGPT_COMPACTION_STAGE_CHAR_BUDGET
+        || estimateTokens(framed, parsed.modelId) > CHATGPT_COMPACTION_STAGE_TOKEN_BUDGET;
+    });
+  };
   const exceedsCompactionBudget = (): boolean => compiled.multipart
     ? estimateCompiledChatGptWebInputTokens(compiled, parsed.modelId) >= multipartTokenBudget!
+      || exceedsStageBudget()
     : chatGptPromptJsonBytes(compiled.text) > CHATGPT_COMPACTION_PROMPT_JSON_BYTE_BUDGET;
 
   // A cumulative checkpoint may be the only remaining account of earlier work. Preserve the

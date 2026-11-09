@@ -1440,7 +1440,7 @@ test.each([false, true])("structured compact rebuilds canonical context when its
   };
   const compact = request(true);
   const events: AdapterEvent[] = [];
-  if (experimentalBiggerContext) compact.context.messages.at(-1)!.content += "x".repeat(160_000);
+  if (experimentalBiggerContext) compact.context.messages.at(-1)!.content += "x".repeat(70_000);
   try {
     await createChatGptWebAdapter(provider).runTurn!(
       compact,

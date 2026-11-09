@@ -105,14 +105,17 @@ test("multipart selection accounts for whole-record and composer fit before subm
 }, 60_000);
 
 test("Bigger Context compaction selects six parts before the legacy inline byte budget", () => {
-  const parsed = request("x".repeat(160_000));
+  // Two records together exceed the retired inline byte budget while each stays inside the
+  // compaction stage budgets, so the payload must ride multipart instead of inline.
+  const parsed = request("x".repeat(60_000));
+  parsed.context.messages.push({ role: "user", content: "x".repeat(60_000), timestamp: 2 });
   parsed._compactionRequest = true;
   const parts = resolveBiggerContextMultipartParts(parsed, capabilities);
   expect(parts).toBe(6);
   const compiled = compileChatGptWebPrompt(parsed, capabilities, undefined, { experimentalMultipartParts: parts });
   expect(compiled.trimmedCompactionMessages).toBeUndefined();
   expect(compiled.multipart!.parts.flatMap(part => JSON.parse(part).records).map(record => record.message.content))
-    .toEqual([parsed.context.messages[0]!.content]);
+    .toEqual(parsed.context.messages.map(message => message.content));
 });
 
 test("GPT-6 Sol stages complete Plus and Pro history with consistent usage accounting", () => {
@@ -164,7 +167,7 @@ test("GPT-6 compaction respects the selected account and effort", () => {
 test("Plus history is rebalanced into smaller Instant uploads and a larger selected-mode final message", () => {
   const plus = { ...capabilities, proAvailable: false, extraHighAvailable: false };
   const parsed = request("");
-  parsed.context.messages = Array.from({ length: 60 }, (_, index) => ({
+  parsed.context.messages = Array.from({ length: 30 }, (_, index) => ({
     role: "user", content: `record-${index}: ${"word ".repeat(3000)}`, timestamp: index + 1,
   }));
   for (const compaction of [false, true]) {
