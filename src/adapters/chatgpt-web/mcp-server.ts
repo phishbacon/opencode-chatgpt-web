@@ -7,7 +7,7 @@ import { namespacedToolName, type CodexTool } from "../../types";
 import { VERSION } from "../../version";
 import type { ChatGptTurnEnvironment } from "./environment";
 import { CODEX_COMPACTION_CONTROL_WIRE_NAME } from "./native-compaction-control";
-import { callTurnBroker, TurnBrokerTimeoutError, type BrokerRetirementDiagnostics, type BrokerToolResult } from "./turn-broker";
+import { callTurnBroker, readEnvMs, TurnBrokerTimeoutError, type BrokerRetirementDiagnostics, type BrokerToolResult } from "./turn-broker";
 import { observeMcpToolCalls } from "./mcp-observation";
 
 interface ClaimedTurn {
@@ -29,6 +29,7 @@ const BRIDGE_TOOL_NAMES = new Set([
   "codex_turn_complete",
   "opencode_tool_inventory",
   "opencode_tool_call",
+  "opencode_subagent_wait",
 ]);
 
 const GATEWAY_AGENT_WAIT_TOOL_NAMES = new Set([
@@ -51,6 +52,27 @@ const AGENT_WAIT_TRANSPORT_RULE = `ChatGPT Web transport rule: wait for exactly 
 // must settle first so an abandoned native tool call is returned as an MCP error instead of
 // letting the tunnel tear down and poison its long-lived stdio transport.
 export const CHATGPT_WEB_MCP_INVOCATION_TIMEOUT_MS = 90_000;
+// Subagent is agent-scale work: it cannot cross a two-minute transport synchronously. The
+// spawn settles early and opencode_subagent_wait collects the result in bounded polls. The
+// env seams exist so tests exercise these bounds without real multi-second waits; the
+// defaults below are the transport contract.
+const SUBAGENT_SPAWN_GRACE_MS = readEnvMs("CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS", 10_000);
+const SUBAGENT_COLLECT_WAIT_MS = readEnvMs("CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS", 30_000);
+const SUBAGENT_PENDING_TIMEOUT_MS = readEnvMs("CODEX_CHATGPT_WEB_SUBAGENT_PENDING_TIMEOUT_MS", 30 * 60_000);
+
+const SUBAGENT_TRANSPORT_RULE = `ChatGPT Web transport rule: call subagent synchronously and never set background — this transport performs the waiting for you. The call returns within seconds with either the finished result or {"status":"running","id"}; while it is running, call opencode_subagent_wait with that id until it reports {"status":"completed"} with the result (each wait blocks at most 30 seconds; a running report is progress, not failure). You may start several subagents before waiting for any of them; wait for each by its own id. While any subagent handle is pending, use only new subagent spawns and opencode_subagent_wait — any other tool call is rejected until the subagent completes. A subagent is capped at 30 minutes; an exceeded cap or a dead turn surfaces as an explicit wait error.`;
+
+const subagentStartedText = (id: string) =>
+  `Subagent started (id: ${id}). It runs for minutes, so this call does not wait for it.`
+  + ` Call opencode_subagent_wait with this id to collect the result, repeating until it reports status "completed".`
+  + ` You may start more subagents first and wait for each by id.`;
+
+const omitBackground = (args: Record<string, unknown>): Record<string, unknown> => {
+  if (!Object.hasOwn(args, "background")) return args;
+  const copy = { ...args };
+  delete copy.background;
+  return copy;
+};
 
 const ZERO_RISK_MCP_INSTRUCTIONS = [
   `For each pasted ${PRODUCT_NAME} request, begin with codex_turn_start using the request_id in its request block.`,
@@ -156,6 +178,7 @@ function isGatewayAgentWaitTool(name: string): boolean {
 
 function browserToolDescription(tool: CodexTool): string {
   if (isAgentWaitTool(tool)) return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE}`;
+  if (!tool.namespace && wireName(tool) === "subagent") return `${tool.description}\n\n${SUBAGENT_TRANSPORT_RULE}`;
   if (!tool.namespace && tool.name === "write_stdin") return `${tool.description}\n\n${COMMAND_POLL_TRANSPORT_RULE}`;
   if (!tool.namespace && tool.name === "exec") {
     return `${tool.description}\n\n${AGENT_WAIT_TRANSPORT_RULE} This rule is enforced for wait_agent calls made inside exec; recursive raw exec is unavailable. ${COMMAND_POLL_TRANSPORT_RULE}`;
@@ -174,6 +197,15 @@ function browserToolParameters(tool: CodexTool): Record<string, unknown> {
       yieldTime.description = COMMAND_POLL_TRANSPORT_RULE;
     }
     return parameters;
+  }
+  if (!tool.namespace && wireName(tool) === "subagent") {
+    // The transport's wait tool replaces the native background mode, whose "DO NOT poll"
+    // contract cannot hold on a two-minute command-response transport.
+    const parameters = structuredClone(tool.parameters) as { properties?: Record<string, unknown>; required?: unknown[] };
+    const properties = { ...(parameters.properties ?? {}) };
+    delete properties.background;
+    const required = (parameters.required ?? []).filter(key => key !== "background");
+    return { ...parameters, properties, ...(required.length > 0 ? { required } : {}) };
   }
   if (!isAgentWaitTool(tool)) return tool.parameters;
   const parameters = structuredClone(tool.parameters);
@@ -595,16 +627,38 @@ export async function runChatGptMcpServer(options: {
     payload: { arguments?: Record<string, unknown>; input?: string },
     signal?: AbortSignal,
   ) => {
-    const timeoutMs = chatGptMcpInvocationTimeout(bound);
+    const toolName = wireName(tool);
+    const isSubagent = toolName === "subagent";
+    // The transport collects subagent results itself: a model-passed background flag would
+    // detach OpenCode's result from the pending invocation that opencode_subagent_wait reads.
+    const relayed = tool.freeform === true
+      ? { input: payload.input ?? "" }
+      : isSubagent
+        ? { arguments: omitBackground(payload.arguments ?? {}) }
+        : { arguments: payload.arguments ?? {} };
+    const timeoutMs = isSubagent
+      ? Math.min(SUBAGENT_SPAWN_GRACE_MS + 5_000, chatGptMcpInvocationTimeout(bound))
+      : chatGptMcpInvocationTimeout(bound);
     try {
-      const response = await callTurnBroker<BrokerToolResult>(options.brokerSocketPath, {
+      const response = await callTurnBroker<BrokerToolResult | { pending?: boolean; callId?: string }>(options.brokerSocketPath, {
         method: "invoke",
         bindingId,
-        wireName: wireName(tool),
+        wireName: toolName,
         freeform: tool.freeform === true,
-        ...(tool.freeform ? { input: payload.input ?? "" } : { arguments: payload.arguments ?? {} }),
+        ...relayed,
+        ...(isSubagent ? {
+          graceMs: SUBAGENT_SPAWN_GRACE_MS,
+          pendingTimeoutMs: SUBAGENT_PENDING_TIMEOUT_MS,
+        } : {}),
       }, timeoutMs, signal);
-      return asMcpResult(response);
+      if (response && typeof response === "object" && "pending" in response && response.pending === true
+        && typeof response.callId === "string") {
+        return asMcpResult({
+          content: [{ type: "text", text: subagentStartedText(response.callId) }],
+          structuredContent: { status: "running", id: response.callId },
+        });
+      }
+      return asMcpResult(response as BrokerToolResult);
     } catch (error) {
       // A cancelled/timed-out MCP request no longer has a consumer for the native result. Revoke
       // the whole turn capability so the broker drops the pending invocation and every later call
@@ -740,6 +794,41 @@ export async function runChatGptMcpServer(options: {
           return invoke(claimed.bindingId, claimed.environment, tool, { arguments: invocationArguments }, extra.signal);
         },
       ),
+    );
+    server.registerTool(
+      "opencode_subagent_wait",
+      {
+        title: "Wait for a started subagent",
+        description: "Collect the result of a subagent started through opencode_tool_call with wire_name \"subagent\". Each call blocks up to 30 seconds and returns either {status:\"running\", elapsed_seconds} — meaning you should call again — or {status:\"completed\"} with the subagent's native result. A running report is progress, not failure.",
+        inputSchema: {
+          turn_token: nativeTurnTokenSchema,
+          id: z.string().regex(/^call_[A-Za-z0-9_-]{10,200}$/, "id must be the call id returned by the started subagent"),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async ({ turn_token, id }, extra) => withClaimedTurn("opencode_subagent_wait", turn_token, extra, async claimed => {
+        try {
+          const response = await callTurnBroker<
+            { status: "completed"; result: BrokerToolResult } | { status: "running"; elapsed_seconds: number }
+          >(options.brokerSocketPath, {
+            method: "collect",
+            bindingId: claimed.bindingId,
+            callId: id,
+            waitMs: SUBAGENT_COLLECT_WAIT_MS,
+          }, SUBAGENT_COLLECT_WAIT_MS + 5_000, extra.signal);
+          if (response.status === "completed") return asMcpResult(response.result);
+          return asMcpResult({
+            content: [{ type: "text", text: `Subagent ${id} is still running after ${response.elapsed_seconds}s; call opencode_subagent_wait again.` }],
+            structuredContent: { status: "running", id, elapsed_seconds: response.elapsed_seconds },
+          });
+        } catch (error) {
+          // Collect is read-only: failures report explicitly and never retire the turn binding.
+          const message = error instanceof TurnBrokerTimeoutError
+            ? `Subagent wait for ${id} did not settle within the transport window; call opencode_subagent_wait again.`
+            : error instanceof Error ? error.message : String(error);
+          return asMcpResult({ content: [{ type: "text", text: message }], isError: true });
+        }
+      }),
     );
     await server.connect(observeMcpToolCalls(new StdioServerTransport(), BRIDGE_TOOL_NAMES));
     return;

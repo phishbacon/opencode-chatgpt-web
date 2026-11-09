@@ -55,6 +55,12 @@ interface PendingInvocation {
   deliveredAt?: number;
   resolve: (result: BrokerToolResult) => void;
   reject: (error: Error) => void;
+  /** Present after construction; collect RPCs race it while the invocation is open. */
+  promise?: Promise<BrokerToolResult>;
+  /** An early-settled spawn: the MCP call returned "started" while execution continues. */
+  pendingSettled?: boolean;
+  /** Total-age cap for a pending subagent; cleared when its result lands or the turn dies. */
+  capTimer?: ReturnType<typeof setTimeout>;
 }
 
 export interface BrokerRetirementDiagnostics {
@@ -111,6 +117,8 @@ interface TurnChannel {
   /** Codex completes calls once; OpenCode must acknowledge identical retried native results after a lost owner RPC. */
   openCodeCompletedToolHashes: Map<string, string>;
   invocations: Map<string, PendingInvocation>;
+  /** Results of early-settled spawns, kept for collect until the turn retires (turn-scoped). */
+  pendingToolResults: Map<string, BrokerToolResult>;
   waiters: Set<ToolWaiter>;
   compactionRequested: boolean;
   compactionResult?: BrokerToolResult;
@@ -135,6 +143,7 @@ interface BrokerRequest {
     | "claim"
     | "resolve"
     | "release"
+    | "collect"
     | "invoke"
     | "owner_status"
     | "owner_register"
@@ -165,6 +174,12 @@ interface BrokerRequest {
   ttlMs?: number;
   traceId?: string;
   callId?: string;
+  /** Invoke only: settle the MCP call after this long with a started-spawn marker if still running. */
+  graceMs?: number;
+  /** Collect only: bounded wait for a pending invocation's result. */
+  waitMs?: number;
+  /** Invoke only: total-age cap armed when a spawn settles early. */
+  pendingTimeoutMs?: number;
   activityId?: string;
   revision?: number;
   toolResult?: BrokerToolResult;
@@ -187,6 +202,32 @@ const MAX_BROKER_LINE_CHARS = 67_108_864;
 const MAX_RETIRED_TURN_HANDLES = 64;
 const MAX_PENDING_CALL_DIAGNOSTICS = 16;
 const MAX_OPENCODE_COMPLETED_TOOL_RECEIPTS = 512;
+/** A pending subagent spawn past this age retires its turn, like a transport timeout would. */
+const SUBAGENT_PENDING_TIMEOUT_MS = 30 * 60_000;
+/** Early-settled results stay collectable until the turn retires; oldest evicts past this bound. */
+const MAX_PENDING_TOOL_RESULTS = 32;
+/** Collect waits never block longer than this, whatever a caller requests. */
+const COLLECT_WAIT_MAX_MS = 30_000;
+
+/** Env override for time constants, used by tests to exercise the bounds without real waits. */
+export function readEnvMs(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/** Stable ordering so identical tool arguments compare equal regardless of key insertion order. */
+const stableArgumentKey = (value: unknown): string => JSON.stringify(value, (_, entry: unknown) => {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+  return Object.fromEntries(Object.entries(entry as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)));
+});
+
+/** Keep an early-settled tool result reachable for collect until the turn retires. */
+const stashPendingToolResult = (channel: TurnChannel, callId: string, result: BrokerToolResult): void => {
+  if (!channel.pendingToolResults.has(callId) && channel.pendingToolResults.size >= MAX_PENDING_TOOL_RESULTS) {
+    channel.pendingToolResults.delete(channel.pendingToolResults.keys().next().value!);
+  }
+  channel.pendingToolResults.set(callId, result);
+};
 
 function completedToolHash(result: BrokerToolResult): string {
   return createHash("sha256").update(JSON.stringify(result)).digest("hex");
@@ -380,6 +421,7 @@ export class TurnBroker implements TurnBrokerOwner {
       deliveredCallIds: new Set(),
       openCodeCompletedToolHashes: new Map(),
       invocations: new Map(),
+      pendingToolResults: new Map(),
       waiters: new Set(),
       compactionRequested: false,
       compactionDeliveryCount: 0,
@@ -533,6 +575,11 @@ export class TurnBroker implements TurnBrokerOwner {
       channel.openCodeCompletedToolHashes.set(callId, completedToolHash(result));
     }
     channel.deliveredCallIds.delete(callId);
+    if (invocation.pendingSettled) {
+      // Nobody is awaiting the early-settled invoke promise; keep the result for collect.
+      if (invocation.capTimer) { clearTimeout(invocation.capTimer); invocation.capTimer = undefined; }
+      stashPendingToolResult(channel, callId, result);
+    }
     channel.invocations.delete(callId);
     console.info(`[chatgpt-web] broker trace=${channel.traceId} completed call=${callId.slice(0, 17)} pending=${channel.invocations.size} isError=${result.isError === true}`);
     invocation.resolve(result);
@@ -1008,7 +1055,7 @@ export class TurnBroker implements TurnBrokerOwner {
     if (!request || typeof request !== "object" || typeof request.id !== "string" || request.id.length === 0 || request.id.length > 256) {
       throw new Error("turn broker request id is invalid");
     }
-    if (!["claim", "resolve", "release", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
+    if (!["claim", "resolve", "release", "collect", "invoke", "owner_status", "owner_register", "owner_register_safe", "owner_update", "owner_safe_sent", "owner_next", "owner_complete", "owner_completion_fence_begin", "owner_completion_fence_commit", "owner_wait_retirement", "owner_revoke", "owner_safe_wait_start", "owner_safe_wait_completion", "owner_request_compaction", "owner_compaction_delivery_count", "safe_start", "safe_complete", "activity_complete", "submit_compaction_handoff"].includes(request.method)) {
       throw new Error("turn broker method is invalid");
     }
   }
@@ -1266,6 +1313,33 @@ export class TurnBroker implements TurnBrokerOwner {
         ...(request.failure === undefined ? {} : { diagnostics: this.retiredBindings.get(bindingId)! }),
       };
     }
+    // Collect is read-only: it bypasses the safe-harness and compaction intercepts, never
+    // retires the binding, and fails explicitly for unknown or already-finished turns.
+    if (request.method === "collect") {
+      const callId = request.callId;
+      if (typeof callId !== "string" || !/^call_[A-Za-z0-9_-]{10,200}$/.test(callId)) {
+        throw new Error("subagent id is invalid");
+      }
+      const channel = binding.channel;
+      const stored = channel.pendingToolResults.get(callId);
+      if (stored) return { status: "completed" as const, result: stored };
+      const invocation = channel.invocations.get(callId);
+      if (!invocation) throw new Error(`unknown subagent id for this turn: ${callId}`);
+      const elapsedSeconds = () => Math.max(0, Math.round((performance.now() - invocation.queuedAt) / 1_000));
+      const waitMs = Math.min(Math.max(0, request.waitMs ?? 0), COLLECT_WAIT_MAX_MS);
+      if (waitMs === 0) return { status: "running" as const, elapsed_seconds: elapsedSeconds() };
+      let waitTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const settled = await Promise.race([
+          invocation.promise!.then(result => result),
+          new Promise<BrokerToolResult | undefined>(resolve => { waitTimer = setTimeout(() => resolve(undefined), waitMs); }),
+        ]);
+        if (settled !== undefined) return { status: "completed" as const, result: settled };
+        return { status: "running" as const, elapsed_seconds: elapsedSeconds() };
+      } finally {
+        clearTimeout(waitTimer);
+      }
+    }
     if (request.method === "resolve") return { environment: binding.channel.environment };
     this.assertSafeHarnessRunning(binding.channel);
     if (binding.channel.compactionRequested) {
@@ -1281,6 +1355,21 @@ export class TurnBroker implements TurnBrokerOwner {
 
     const wireName = request.wireName?.trim();
     if (!wireName) throw new Error("wire tool name is required");
+    // A pending subagent blocks OpenCode's step: any other tool would queue behind it and
+    // die at the transport deadline, retiring the whole turn. Return a teachable tool error
+    // instead of throwing — a thrown invoke error triggers the catch path that releases and
+    // retires the turn — while new spawns and opencode_subagent_wait stay available.
+    if (wireName !== "subagent"
+      && [...binding.channel.invocations.values()].some(invocation => invocation.pendingSettled)) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: "OpenCode is still running a subagent for this turn; only new subagent spawns"
+            + " and opencode_subagent_wait are available until it completes.",
+        }],
+        isError: true,
+      };
+    }
     const callId = opaqueId("call");
     const toolRequest: BrokerToolRequest = {
       callId,
@@ -1288,20 +1377,67 @@ export class TurnBroker implements TurnBrokerOwner {
       freeform: request.freeform === true,
       ...(request.freeform === true ? { input: request.input ?? "" } : { arguments: request.arguments ?? {} }),
     };
-    return new Promise<BrokerToolResult>((resolveInvoke, rejectInvoke) => {
-      binding.channel.invocations.set(callId, {
-        request: toolRequest, queuedAt: performance.now(), resolve: resolveInvoke, reject: rejectInvoke,
+    const graceMs = request.graceMs;
+    // An identical pending subagent spawn is the same run: return its handle instead of
+    // queueing a duplicate. Scoped to subagent so equal-argument shell/read calls from a
+    // parallel batch stay distinct runs.
+    if (wireName === "subagent") {
+      const identical = [...binding.channel.invocations.values()].find(existing =>
+        existing.request.wireName === toolRequest.wireName
+        && existing.request.freeform === toolRequest.freeform
+        && stableArgumentKey(existing.request.freeform ? existing.request.input : existing.request.arguments)
+          === stableArgumentKey(toolRequest.freeform ? toolRequest.input : toolRequest.arguments));
+      if (identical) {
+        console.info(`[chatgpt-web] broker trace=${binding.channel.traceId} spawn_deduplicated call=${identical.request.callId.slice(0, 17)}`);
+        return { pending: true, callId: identical.request.callId };
+      }
+    }
+    let resolveInvoke!: (result: BrokerToolResult) => void;
+    let rejectInvoke!: (error: Error) => void;
+    const invocationPromise = new Promise<BrokerToolResult>((res, rej) => { resolveInvoke = res; rejectInvoke = rej; });
+    const invocation: PendingInvocation = {
+      request: toolRequest, queuedAt: performance.now(),
+      resolve: resolveInvoke, reject: rejectInvoke, promise: invocationPromise,
+    };
+    binding.channel.invocations.set(callId, invocation);
+    binding.channel.queuedCallIds.push(callId);
+    console.info(
+      `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size}`,
+    );
+    const modelObservation = !toolRequest.freeform && subagentModelObservation(wireName, toolRequest.arguments);
+    if (modelObservation) console.info(`[chatgpt-web] subagent_model_requested ${JSON.stringify({
+      traceId: binding.channel.traceId, callId: callId.slice(0, 17), tool: wireName, ...modelObservation,
+    })}`);
+    this.scheduleToolWaiters(binding.channel);
+    if (graceMs === undefined) return invocationPromise;
+    // Early settle: within the grace the real result answers the MCP call; afterwards the call
+    // returns a started-spawn marker while the invocation stays open for opencode_subagent_wait.
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const settled = await Promise.race([
+        invocationPromise.then(result => result),
+        new Promise<BrokerToolResult | undefined>(resolve => { graceTimer = setTimeout(() => resolve(undefined), Math.max(0, graceMs)); }),
+      ]);
+      if (settled !== undefined) return settled;
+    } finally {
+      clearTimeout(graceTimer);
+    }
+    invocation.pendingSettled = true;
+    const clearCapTimer = () => {
+      if (invocation.capTimer) { clearTimeout(invocation.capTimer); invocation.capTimer = undefined; }
+    };
+    const requestedCap = Number.isFinite(request.pendingTimeoutMs)
+      ? request.pendingTimeoutMs! : SUBAGENT_PENDING_TIMEOUT_MS;
+    const pendingCapMs = Math.min(Math.max(Math.floor(requestedCap), 1), 2 * 60 * 60_000);
+    invocation.capTimer = setTimeout(() => {
+      // Identical retirement semantics to a transport timeout, at the subagent's total-age cap.
+      this.revoke(binding.token, chatGptToolTimeoutError("subagent", pendingCapMs), {
+        code: "codex_tool_timeout", tool: "subagent", timeoutMs: pendingCapMs,
       });
-      binding.channel.queuedCallIds.push(callId);
-      console.info(
-        `[chatgpt-web] broker trace=${binding.channel.traceId} queued call=${callId.slice(0, 17)} tool=${wireName} waiters=${binding.channel.waiters.size}`,
-      );
-      const modelObservation = !toolRequest.freeform && subagentModelObservation(wireName, toolRequest.arguments);
-      if (modelObservation) console.info(`[chatgpt-web] subagent_model_requested ${JSON.stringify({
-        traceId: binding.channel.traceId, callId: callId.slice(0, 17), tool: wireName, ...modelObservation,
-      })}`);
-      this.scheduleToolWaiters(binding.channel);
-    });
+    }, pendingCapMs);
+    invocationPromise.then(clearCapTimer, clearCapTimer);
+    console.info(`[chatgpt-web] broker trace=${binding.channel.traceId} spawn_settled_early call=${callId.slice(0, 17)} tool=${wireName}`);
+    return { pending: true, callId };
   }
 
   private takeQueued(channel: TurnChannel): BrokerToolRequest[] {
@@ -1363,6 +1499,7 @@ export class TurnBroker implements TurnBrokerOwner {
     channel.queuedCallIds = [];
     channel.deliveredCallIds.clear();
     channel.openCodeCompletedToolHashes.clear();
+    channel.pendingToolResults.clear();
   }
 
   private prune(): void {

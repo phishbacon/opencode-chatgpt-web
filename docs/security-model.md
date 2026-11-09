@@ -33,6 +33,13 @@ created. Repository contents, tool output, websites, and prompt text are untrust
    exact 10-second `wait_agent` polling contract and prevents recursive raw `exec`. The generic
    inventory/call pair also provides a structured exact-name path. Codex remains responsible for
    its sandbox, approval, UI, command sessions, and tool result.
+   The OpenCode contract adds a read-only `opencode_subagent_wait` collector over plain broker
+   call ids: a collect resolves only inside the binding that started the subagent — an unknown
+   id or a retired turn fails explicitly — its stored result lives only until that turn retires,
+   and a collect can never release or retire a binding itself. A 30-minute subagent cap retires
+   a hung turn with the same failure shape as a transport timeout, so no unbounded wait can pin
+   a turn, and a model-passed `background` flag is stripped before relay so the transport's
+   result path stays the only one.
 6. Before a Codex tool batch is dispatched, the browser records and acknowledges the current answer
    projection. Completion stays blocked while the tool is unresolved and then requires a new stable
    final-answer projection after that causal boundary. A two-phase broker fence then rereads the DOM

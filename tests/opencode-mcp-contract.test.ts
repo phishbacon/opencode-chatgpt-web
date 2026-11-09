@@ -25,8 +25,16 @@ const patch = { name: "patch", description: "Apply a patch", freeform: true, par
 const search = { name: "tool_search", description: "Discover deferred tools", toolSearch: true, parameters: {
   type: "object", properties: { query: { type: "string" } },
 } };
+// Mirrors OpenCode's declared subagent schema, including the native background field the
+// transport must strip and hide from advertised schemas.
+const subagent = { name: "subagent", description: "Run a subagent for this task", parameters: {
+  type: "object", properties: {
+    agent: { type: "string" }, description: { type: "string" }, prompt: { type: "string" },
+    model: { type: "string" }, sessionID: { type: "string" }, background: { type: "boolean" },
+  }, required: ["agent", "description", "prompt"],
+} };
 
-function environment(origin?: "opencode"): ChatGptTurnEnvironment {
+function environment(origin?: "opencode", extraTools: ChatGptTurnEnvironment["tools"] = []): ChatGptTurnEnvironment {
   return {
     ...(origin ? { origin } : {}),
     cwd: process.cwd(),
@@ -35,12 +43,12 @@ function environment(origin?: "opencode"): ChatGptTurnEnvironment {
     sandboxPolicy: { type: "workspaceWrite", writableRoots: [process.cwd()], networkAccess: false },
     tools: [shell, read, patch, search, {
       name: "lookup", namespace: "mcp__fixture", description: "Find fixture entries", parameters: { type: "object" },
-    }],
+    }, ...extraTools],
   };
 }
 
 let sequence = 0;
-async function fixture(contract: "native" | "opencode" = "opencode") {
+async function fixture(contract: "native" | "opencode" = "opencode", spawnEnv: Record<string, string> = {}) {
   const endpointName = `oc-mcp-${process.pid}-${++sequence}`;
   const socketPath = process.platform === "win32"
     ? defaultBrokerEndpoint(join(tmpdir(), endpointName), "win32")
@@ -53,6 +61,7 @@ async function fixture(contract: "native" | "opencode" = "opencode") {
     // Inherit stderr: an undrained "pipe" fills its buffer and blocks the MCP
     // child on Windows, which stalls the initialize handshake indefinitely.
     stderr: "inherit",
+    env: { ...process.env, ...spawnEnv } as Record<string, string>,
   });
   const client = new Client({ name: "opencode-website-contract-test", version: "1" });
   const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
@@ -84,7 +93,7 @@ describe("OpenCode website MCP contract", () => {
     const token = await f.broker.register(environment("opencode"), 60_000);
     try {
       expect((await f.client.listTools()).tools.map(tool => tool.name).sort()).toEqual([
-        "opencode_tool_call", "opencode_tool_inventory",
+        "opencode_subagent_wait", "opencode_tool_call", "opencode_tool_inventory",
       ]);
       const all = await f.call("opencode_tool_inventory", { turn_token: token, limit: 2 });
       expect(all.structuredContent).toMatchObject({
@@ -439,6 +448,270 @@ describe("OpenCode website MCP contract", () => {
       expect((await website).content).toEqual([{ type: "text", text: "completed" }]);
       f.broker.revoke(token);
       expect((await f.call("opencode_tool_inventory", { turn_token: token })).isError).toBe(true);
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("settles a slow subagent as a running handle and later collects its native result", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const started = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Trace a thing", prompt: "Find the root cause" },
+      });
+      const [request] = await f.broker.nextToolBatch(token);
+      expect(request?.wireName).toBe("subagent");
+      const handle = (await started).structuredContent as { status?: string; id?: string };
+      expect(handle.status).toBe("running");
+      expect(handle.id).toBe(request!.callId);
+      const stillRunning = await f.call("opencode_subagent_wait", { turn_token: token, id: handle.id! });
+      expect(stillRunning.isError).toBeUndefined();
+      expect(stillRunning.structuredContent).toMatchObject({ status: "running", id: handle.id! });
+      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+        content: [{ type: "text", text: "child finished" }],
+        structuredContent: { sessionID: "ses_child123", status: "completed", output: "child finished" },
+      });
+      const completed = await f.call("opencode_subagent_wait", { turn_token: token, id: handle.id! });
+      expect(completed.isError).toBeUndefined();
+      expect(completed.structuredContent).toEqual({ sessionID: "ses_child123", status: "completed", output: "child finished" });
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("returns the native result inline when the subagent finishes within the grace", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "2000",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const started = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Fast thing", prompt: "Finish quickly" },
+      });
+      const [request] = await f.broker.nextToolBatch(token);
+      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+        content: [{ type: "text", text: "fast" }],
+        structuredContent: { sessionID: "ses_child456", status: "completed", output: "fast" },
+      });
+      const inline = await started;
+      expect(inline.structuredContent).toEqual({ sessionID: "ses_child456", status: "completed", output: "fast" });
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("runs parallel subagent spawns with independent ids and collects them independently", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const first = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "First trace", prompt: "Trace the notification path" },
+      });
+      const second = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Second trace", prompt: "Trace the click handler" },
+      });
+      const batch = await f.broker.nextToolBatch(token);
+      expect(batch).toHaveLength(2);
+      const [one, two] = batch;
+      expect(one!.callId).not.toBe(two!.callId);
+      // The first child is still unexecuted: its wait reports running.
+      const runningFirst = await f.call("opencode_subagent_wait", { turn_token: token, id: one!.callId });
+      expect(runningFirst.structuredContent).toMatchObject({ status: "running", id: one!.callId });
+      // Results arrive in reverse order; each collect resolves only its own id.
+      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, two!.callId, {
+        content: [{ type: "text", text: "second done" }],
+      });
+      const secondDone = await f.call("opencode_subagent_wait", { turn_token: token, id: two!.callId });
+      expect(secondDone.isError).toBeUndefined();
+      expect(secondDone.content).toEqual([{ type: "text", text: "second done" }]);
+      expect((await f.call("opencode_subagent_wait", { turn_token: token, id: one!.callId })).structuredContent)
+        .toMatchObject({ status: "running" });
+      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, one!.callId, {
+        content: [{ type: "text", text: "first done" }],
+      });
+      const firstDone = await f.call("opencode_subagent_wait", { turn_token: token, id: one!.callId });
+      expect(firstDone.content).toEqual([{ type: "text", text: "first done" }]);
+      const startedFirst = await first;
+      expect(startedFirst.structuredContent).toMatchObject({ id: one!.callId });
+      await second;
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("returns the existing handle for an identical pending subagent spawn", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const args = { agent: "explore", description: "Duplicate probe", prompt: "Investigate the duplicate guard" };
+      const first = f.call("opencode_tool_call", { turn_token: token, wire_name: "subagent", arguments: args });
+      const [request] = await f.broker.nextToolBatch(token);
+      expect(((await first).structuredContent as { id?: string }).id).toBe(request!.callId);
+      const duplicate = f.call("opencode_tool_call", { turn_token: token, wire_name: "subagent", arguments: { ...args } });
+      expect(((await duplicate).structuredContent as { id?: string }).id).toBe(request!.callId);
+      // A different prompt is a different run: its handle carries a fresh call id, which
+      // also proves the dedup key matched only the identical pending spawn.
+      const distinct = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent", arguments: { ...args, prompt: "A different investigation" },
+      });
+      expect(((await distinct).structuredContent as { id?: string }).id).not.toBe(request!.callId);
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("strips a model-passed background flag before relaying subagent to OpenCode", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const started = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Background probe", prompt: "Run detached", background: true },
+      });
+      const [request] = await f.broker.nextToolBatch(token);
+      expect(request?.arguments).not.toHaveProperty("background");
+      expect(request?.arguments).toMatchObject({
+        agent: "explore", description: "Background probe", prompt: "Run detached",
+      });
+      await started;
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("fails collect explicitly for unknown ids and for retired turns", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const bogus = await f.call("opencode_subagent_wait", { turn_token: token, id: `call_${"z".repeat(32)}` });
+      expect(bogus.isError).toBe(true);
+      expect((bogus.content as Array<{ type: string; text: string }>)[0])
+        .toMatchObject({ type: "text", text: expect.stringContaining("unknown subagent id") });
+      const started = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Doomed", prompt: "Will be revoked" },
+      });
+      const [request] = await f.broker.nextToolBatch(token);
+      await started;
+      f.broker.revoke(token);
+      const afterRetire = await f.call("opencode_subagent_wait", { turn_token: token, id: request!.callId });
+      expect(afterRetire.isError).toBe(true);
+      expect((afterRetire.content as Array<{ text: string }>)[0]!.text).toMatch(/expired|invalid|already finished/i);
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("retires the turn when a pending subagent exceeds its total cap", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_PENDING_TIMEOUT_MS: "250",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const started = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Hung child", prompt: "Never finishes" },
+      });
+      const [request] = await f.broker.nextToolBatch(token);
+      await started;
+      const before = await f.call("opencode_subagent_wait", { turn_token: token, id: request!.callId });
+      expect(before.structuredContent).toMatchObject({ status: "running" });
+      await Bun.sleep(400); // grace (50) + cap (250) elapse → the turn retires itself
+      const after = await f.call("opencode_subagent_wait", { turn_token: token, id: request!.callId });
+      expect(after.isError).toBe(true);
+      expect((after.content as Array<{ text: string }>)[0]!.text).toMatch(/expired|invalid|already finished/i);
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("advertises the subagent wait protocol without the native background mode", async () => {
+    const f = await fixture();
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const inventory = await f.call("opencode_tool_inventory", { turn_token: token, include_schema: true, limit: 50 });
+      const payload = inventory.structuredContent as {
+        tools: Array<{ wire_name: string; description: string; parameters?: { properties?: Record<string, unknown>; required?: unknown[] } }>;
+      };
+      const entry = payload.tools.find(tool => tool.wire_name === "subagent");
+      expect(entry).toBeDefined();
+      expect(entry!.description).toContain("opencode_subagent_wait");
+      expect(entry!.description).toContain("never set background");
+      expect(entry!.parameters?.properties).not.toHaveProperty("background");
+      expect(entry!.parameters?.properties).toHaveProperty("model");
+      expect(entry!.parameters?.properties).toHaveProperty("sessionID");
+      expect(entry!.parameters?.required).toEqual(["agent", "description", "prompt"]);
+      // The wait tool is a first-class bridge tool, not an inventory entry.
+      expect(payload.tools.some(tool => tool.wire_name === "opencode_subagent_wait")).toBe(false);
+    } finally {
+      f.broker.revoke(token);
+      await f.close();
+    }
+  }, 15_000);
+
+  test("rejects other tool calls while a subagent is pending and recovers after it completes", async () => {
+    const f = await fixture("opencode", {
+      CODEX_CHATGPT_WEB_SUBAGENT_SPAWN_GRACE_MS: "50",
+      CODEX_CHATGPT_WEB_SUBAGENT_COLLECT_WAIT_MS: "50",
+    });
+    const token = await f.broker.register(environment("opencode", [subagent]), 60_000);
+    try {
+      const spawned = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "subagent",
+        arguments: { agent: "explore", description: "Hold", prompt: "Hold the turn open" },
+      });
+      const [request] = await f.broker.nextToolBatch(token);
+      expect(((await spawned).structuredContent as { status?: string }).status).toBe("running");
+      // OpenCode is blocked on the subagent: any other tool would queue past the
+      // transport deadline and retire the turn, so it is rejected explicitly.
+      const blocked = await f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "shell", arguments: { command: "echo nope" },
+      });
+      expect(blocked.isError).toBe(true);
+      expect((blocked.content as Array<{ text: string }>)[0]!.text).toContain("opencode_subagent_wait");
+      // The turn binding survives the rejection, and once the subagent's result
+      // lands the normal tool path works again.
+      await deliverOpenCodeToolResult(new RemoteTurnBroker(f.broker.socketPath), token, request!.callId, {
+        content: [{ type: "text", text: "done" }],
+      });
+      const shell = f.call("opencode_tool_call", {
+        turn_token: token, wire_name: "shell", arguments: { command: "echo ok" },
+      });
+      const [shellRequest] = await f.broker.nextToolBatch(token);
+      expect(shellRequest?.wireName).toBe("shell");
+      f.broker.completeTool(token, shellRequest!.callId, { content: [{ type: "text", text: "ok" }] });
+      expect((await shell).content).toEqual([{ type: "text", text: "ok" }]);
     } finally {
       f.broker.revoke(token);
       await f.close();

@@ -50,6 +50,14 @@ launcher-owned codex-chatgpt-web daemon
   preserves Codex's native freeform `exec`; its tool registry enforces the same bounded
   `wait_agent` contract as direct and structured calls.
 - Tool calls and results remain in the same ChatGPT response while Codex executes them locally.
+- OpenCode's contract faces the same transport limit with its synchronous, minutes-long
+  `subagent` tool and resolves it the same way: the spawn settles early with a
+  `{"status":"running","id"}` handle (a subagent that finishes inside the grace returns its
+  native result inline), and `opencode_subagent_wait` collects the result in bounded
+  30-second polls scoped to the turn that started it. Identical pending spawns deduplicate
+  onto one id, the native `background` flag is stripped before relay, and a 30-minute cap
+  retires a turn whose subagent never returns. The model-visible contract lives in the
+  amended `subagent` entry of `opencode_tool_inventory`.
 
 ### Repository DEV driver
 
