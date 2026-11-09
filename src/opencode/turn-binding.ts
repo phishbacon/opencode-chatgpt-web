@@ -16,6 +16,9 @@ import { dirname, isAbsolute, resolve } from "node:path";
 const HEADER_VERSION = 2;
 const MAX_ENVELOPE_LENGTH = 2048;
 const MAX_REQUEST_AGE_MS = 2 * 60_000;
+/** OpenCode re-sends its one prepared compaction header when a shrink-retry follows an
+ *  overflow rejection. Re-serving that read-only request briefly is safe; primaries stay one-shot. */
+const COMPACTION_RETRY_WINDOW_MS = 60_000;
 const MAX_CLOCK_SKEW_MS = 5_000;
 const ID = /^[A-Za-z0-9_-]{8,160}$/;
 const NONCE = /^[a-f0-9]{32}$/;
@@ -394,7 +397,7 @@ export class OpenCodeTurnVerifier {
     return epochs;
   }
 
-  private readonly seenRequests = new Map<string, number>();
+  private readonly seenRequests = new Map<string, { expiresAt: number; seenAt: number }>();
   private readonly current = new Map<string, { nonce: string; started: number; epoch: number; ownerKey: string; retired: boolean }>();
   /** Keep authenticated deletion identity so a transport retry cannot retire another owner. */
   private readonly deletedSessions = new Map<string, { ownerKey: string; nonce: string }>();
@@ -435,9 +438,11 @@ export class OpenCodeTurnVerifier {
       throw new OpenCodeTurnBindingError("OpenCode turn binding changed trusted session owner");
     }
     // Prune bounded-lived request nonces. No prompts or tool results enter this store.
-    for (const [nonce, expiry] of this.seenRequests) if (expiry <= now) this.seenRequests.delete(nonce);
+    for (const [nonce, entry] of this.seenRequests) if (entry.expiresAt <= now) this.seenRequests.delete(nonce);
     const requestKey = `${claims.sessionID}:${claims.requestNonce}`;
-    if (this.seenRequests.has(requestKey)) {
+    const alreadySeen = this.seenRequests.get(requestKey);
+    if (alreadySeen && !(claims.purpose === "compaction"
+      && now - alreadySeen.seenAt <= COMPACTION_RETRY_WINDOW_MS)) {
       throw new OpenCodeTurnBindingError("OpenCode provider request was already accepted");
     }
     // Readiness checks may inspect a signed request before browser routing is
@@ -446,7 +451,8 @@ export class OpenCodeTurnVerifier {
       this.current.set(claims.sessionID, { nonce: claims.turnNonce, started: claims.turnStarted,
         epoch: claims.compactionEpoch,
         ownerKey: openCodeOwnerKey(claims.owner), retired: false });
-      this.seenRequests.set(requestKey, claims.expiresAt);
+      // Preserve the first-seen time so repeated compaction re-sends cannot extend their own window.
+      if (!alreadySeen) this.seenRequests.set(requestKey, { expiresAt: claims.expiresAt, seenAt: now });
     }
     return claims;
   }

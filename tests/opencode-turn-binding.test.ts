@@ -135,6 +135,26 @@ describe("OpenCode turn ownership", () => {
     expect(f.verify(f.sign()).messageID).toBe(MESSAGE);
   });
 
+  test("replays an identical signed compaction inside the retry window only", () => {
+    const f = fixture();
+    f.begin();
+    const compaction = f.issuer.signCompactionRequest(SESSION, MODEL);
+    expect(f.verify(compaction).purpose).toBe("compaction");
+    // OpenCode's shrink-retry re-sends the one prepared header; the read-only
+    // compaction is re-served while claims are live and the window holds.
+    expect(f.verify(compaction).purpose).toBe("compaction");
+    f.advance(50_000);
+    expect(f.verify(compaction).purpose).toBe("compaction");
+    // Past the window (but before claim expiry) the replay is rejected again,
+    // and repeated re-sends cannot extend their own window.
+    f.advance(30_000);
+    expect(() => f.verify(compaction)).toThrow("already accepted");
+    // Primaries are one-shot regardless of the compaction window.
+    const primary = f.sign();
+    f.verify(primary);
+    expect(() => f.verify(primary)).toThrow("already accepted");
+  });
+
   test("rejects expired and future-dated calls", () => {
     const f = fixture();
     f.begin();

@@ -51,7 +51,7 @@ import { namespacedToolName, type AdapterEvent, type CodexParsedRequest } from "
 import { OPENCODE_MODEL_PREFIX, verifyOpenCodeResponsesIngress } from "./opencode/request-auth";
 import { assertOpenCodeDevListenerConfig, guardOpenCodeDevHttpRequest,
   type OpenCodeDevListenerOptions } from "./opencode/dev-listener";
-import { OpenCodeTurnVerifier, parseTurnSigningKey, type OpenCodeTurnClaims } from "./opencode/turn-binding";
+import { OPENCODE_TURN_HEADER, OpenCodeTurnVerifier, parseTurnSigningKey, type OpenCodeTurnClaims } from "./opencode/turn-binding";
 import { OpenCodeToolReceiptLedger } from "./opencode/tool-receipts";
 import {
   consumeOpenCodeSessionDeletion, OPENCODE_SESSION_DELETED_HEADER,
@@ -703,6 +703,26 @@ export async function responseRequest(
   const requestedModel = raw && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as { model?: unknown }).model
     : undefined;
+  // Every ingress rejection gets a record: when a retried request died as an opaque
+  // replay, the first failing attempt had left no trace in any log.
+  const logRejection = (error: unknown): void => {
+    let sessionID: unknown;
+    let purpose: unknown;
+    try {
+      const header = req.headers.get(OPENCODE_TURN_HEADER);
+      if (header) {
+        const claims = JSON.parse(Buffer.from(header.split(".")[0]!, "base64url").toString("utf8")) as Record<string, unknown>;
+        sessionID = claims.sessionID;
+        purpose = claims.purpose;
+      }
+    } catch { /* unparseable headers still log the message itself */ }
+    console.error(`[chatgpt-web] opencode_ingress_rejected ${JSON.stringify({
+      model: typeof requestedModel === "string" ? requestedModel : null,
+      sessionID: sessionID ?? null,
+      purpose: purpose ?? null,
+      error: error instanceof Error ? error.message : String(error),
+    })}`);
+  };
   let verifiedOpenCodeTurn: OpenCodeTurnClaims | undefined;
   try {
     verifiedOpenCodeTurn = verifyOpenCodeResponsesIngress(req, raw, options.openCodeTurnVerifier,
@@ -715,10 +735,12 @@ export async function responseRequest(
         }
         routeOpenCodeBrowserRequest(openCodeParsed, verifiedOpenCodeTurn, config);
       } catch (error) {
+        logRejection(error);
         return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
       }
     }
   } catch (error) {
+    logRejection(error);
     return formatErrorResponse(401, "authentication_error", error instanceof Error ? error.message : String(error));
   }
   if (!verifiedOpenCodeTurn) {
@@ -768,6 +790,7 @@ export async function responseRequest(
       }
     }
   } catch (error) {
+    logRejection(error);
     return formatErrorResponse(400, "invalid_request_error", error instanceof Error ? error.message : String(error));
   }
   if (parsed._opaqueMultiAgentV2Payload) {
