@@ -4,6 +4,39 @@ import { ChatGptBrowserWorker } from "../src/adapters/chatgpt-web/browser-worker
 import { chatGptHtmlToMarkdown, ChatGptMarkdownBuffer } from "../src/adapters/chatgpt-web/markdown";
 import { readFileSync } from "node:fs";
 
+test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("records the accepted user identity when Activity unmounts the group before first observation", async () => {
+  const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
+  try {
+    const worker = Object.create(ChatGptBrowserWorker.prototype) as any;
+    const prompt = "Summarize the staged context.";
+    const page = await browser.newPage();
+    await page.setContent("<main></main>");
+    const baseline = await worker.captureSubmissionBaseline(page, prompt);
+    // The response mounts while the user group is still unmounted, so the first observation
+    // can only settle acceptance on assistant evidence — the production race that left
+    // acceptedUserIdentity null and forced the reconcile into a byte-comparison it cannot win.
+    await page.locator("main").evaluate(node => {
+      node.innerHTML = '<div data-turn-key="staged">'
+        + '<div data-content-search-unit-key="staged:assistant">'
+        + '<div data-conversation-role="assistant"></div>'
+        + '<div data-markdown-text-style="assistant-message"><p>Reading...</p></div></div></div>';
+    });
+    const accepted = worker.waitForSubmissionAccepted(page, baseline, undefined);
+    await new Promise(resolve => setTimeout(resolve, 700));
+    // Activity returns the user group with the same id mid-grace.
+    await page.locator("main").evaluate(node => {
+      node.innerHTML = '<div data-turn-key="staged">'
+        + '<div data-user-message-bubble><div data-search-result-target style="white-space:pre-wrap">'
+        + 'Summarize the staged context.</div></div>'
+        + '<div data-content-search-unit-key="staged:assistant">'
+        + '<div data-conversation-role="assistant"></div>'
+        + '<div data-markdown-text-style="assistant-message"><p>Reading...</p></div></div></div>';
+    });
+    expect(await accepted).toBe("assistant_turn");
+    expect(baseline.acceptedUserIdentity).toBe("group:user:staged");
+  } finally { await browser.close(); }
+}, 20_000);
+
 test.skipIf(!process.env.CHATGPT_DOM_TEST_BROWSER)("CodeMirror language invalidates the response cache and incomplete code is not delivered", async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHATGPT_DOM_TEST_BROWSER, headless: true });
   try {

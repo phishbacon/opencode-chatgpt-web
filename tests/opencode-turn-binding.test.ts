@@ -135,7 +135,7 @@ describe("OpenCode turn ownership", () => {
     expect(f.verify(f.sign()).messageID).toBe(MESSAGE);
   });
 
-  test("replays an identical signed compaction inside the retry window only", () => {
+  test("replays an identical signed compaction until its claim expires", () => {
     const f = fixture();
     f.begin();
     const compaction = f.issuer.signCompactionRequest(SESSION, MODEL);
@@ -145,10 +145,13 @@ describe("OpenCode turn ownership", () => {
     expect(f.verify(compaction).purpose).toBe("compaction");
     f.advance(50_000);
     expect(f.verify(compaction).purpose).toBe("compaction");
-    // Past the window (but before claim expiry) the replay is rejected again,
-    // and repeated re-sends cannot extend their own window.
-    f.advance(30_000);
-    expect(() => f.verify(compaction)).toThrow("already accepted");
+    // Failed attempts re-send the prepared header minutes later; the replay guard
+    // must hold for the binding's whole life, not a 60s slice of it.
+    f.advance(300_000);
+    expect(f.verify(compaction).purpose).toBe("compaction");
+    // At claim expiry the binding itself dies, before any replay question.
+    f.advance(300_000);
+    expect(() => f.verify(compaction)).toThrow("expired or is from the future");
     // Primaries are one-shot regardless of the compaction window.
     const primary = f.sign();
     f.verify(primary);

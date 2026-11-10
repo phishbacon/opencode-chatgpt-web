@@ -23,7 +23,12 @@ const MAX_ENVELOPE_LENGTH = 2048;
 const MAX_REQUEST_AGE_MS = 10 * 60_000;
 /** OpenCode re-sends its one prepared compaction header when a shrink-retry follows an
  *  overflow rejection. Re-serving that read-only request briefly is safe; primaries stay one-shot. */
-const COMPACTION_RETRY_WINDOW_MS = 60_000;
+// OpenCode pre-signs one compaction header and re-sends it after every failed attempt;
+// an attempt runs ~50s and its backoff pushes retries well past a minute, so a short
+// window made every recovery die on the replay guard. The window now spans the binding's
+// whole life: a compaction binding may be re-sent until it expires, primaries stay
+// one-shot, and a re-send never extends the clock it is racing.
+const COMPACTION_RETRY_WINDOW_MS = 10 * 60_000;
 const MAX_CLOCK_SKEW_MS = 5_000;
 const ID = /^[A-Za-z0-9_-]{8,160}$/;
 const NONCE = /^[a-f0-9]{32}$/;

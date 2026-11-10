@@ -159,6 +159,15 @@ export const CHATGPT_RESPONSE_DOM_GRACE_MS = 60_000;
  * the bounded staged-send budget.
  */
 export const CHATGPT_MULTIPART_RESPONSE_DOM_GRACE_MS = 180_000;
+/**
+ * How long the acceptance wait keeps watching for the user group after Activity has already
+ * unmounted it. When the response mounts first, acceptance lands on assistant/generation
+ * evidence and the accepted identity is never recorded — the later reconcile then falls back
+ * to byte-comparing the rendered message, which large compaction prompts can never win
+ * (no turn_token survives the trimmed omission resume). Activity returns the group with the
+ * same id; one visible sample records the exact identity the reconcile needs.
+ */
+export const CHATGPT_ACCEPTED_IDENTITY_GRACE_MS = 10_000;
 export const CHATGPT_EMPTY_RESPONSE_GRACE_MS = 10_000;
 // #885 includes a final arriving 125 seconds after Stop and other progress disappeared.
 // Absence of those controls is an uncertain idle state, not a completed or failed response.
@@ -2722,7 +2731,24 @@ export class ChatGptBrowserWorker {
       } else {
         evidence = await observeDom();
       }
-      if (evidence) return evidence;
+      if (evidence) {
+        if (evidence === "user_turn" || baseline.acceptedUserIdentity !== undefined) return evidence;
+        // Activity can unmount the user group before the first observation while the response
+        // already mounts: acceptance settles on assistant/generation evidence and the accepted
+        // identity is never recorded, leaving the reconcile to byte-compare a rendered message
+        // it can never win (large compaction prompts carry no turn_token). Keep watching for
+        // the group's return — Activity restores it with the same id — and settle for the
+        // original evidence either way.
+        const firstEvidence = evidence;
+        const graceDeadline = Date.now() + CHATGPT_ACCEPTED_IDENTITY_GRACE_MS;
+        while (Date.now() < graceDeadline) {
+          if (signal?.aborted) throw new DOMException("ChatGPT web turn aborted", "AbortError");
+          await new Promise(resolveSleep => setTimeout(resolveSleep, 500));
+          await observeDom(); // records the accepted identity as a side effect of seeing the group
+          if (baseline.acceptedUserIdentity !== undefined) return firstEvidence;
+        }
+        return firstEvidence;
+      }
       await this.waitForTurnDomOrExternalProgress(
         page,
         progress?.revision ?? 0,
@@ -3126,7 +3152,20 @@ export class ChatGptBrowserWorker {
         // Activity can replace its temporary group while still generating; requiring
         // a completed answer here mistakes that same unfinished turn for a foreign one.
       }
-      if (!matches) throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
+      if (!matches) {
+        // Which ownership anchor broke decides the fix: a re-keyed id, a failed pairing
+        // or a renderer-rewritten text compare look identical without this record.
+        console.error(`[chatgpt-web] turn_binding_reconcile_failed ${JSON.stringify({
+          identity: identity ?? null,
+          user,
+          accepted: baseline.acceptedUserIdentity ?? null,
+          replacement,
+          responseIdentities: state.responseIdentities.slice(0, 6),
+          turnIdentities: state.turnIdentities.slice(0, 8),
+          initial: baseline.initialTurnIdentities.slice(0, 6),
+        })}`);
+        throw new Error("ChatGPT opened another user turn while the bound assistant response was detached");
+      }
       // Expanding a truncated bubble can yield to another DOM update. Keep the
       // no-competing-turn check valid after that action, not just before it.
       const current = await this.submissionDomState(page, baseline.domCache, signal);
@@ -5311,7 +5350,7 @@ export class ChatGptBrowserWorker {
             ),
           );
           console.info(
-            `[chatgpt-web] browser turn ${turn.traceId} multipart part ${index + 1}/${prepared.multipart.parts.length} submission accepted evidence=${evidence}`,
+            `[chatgpt-web] browser turn ${turn.traceId} multipart part ${index + 1}/${prepared.multipart.parts.length} submission accepted evidence=${evidence} acceptedIdentitySet=${stageBaseline.acceptedUserIdentity !== undefined}`,
           );
           const acknowledgedResponse = await (async () => {
             let polling = true;
@@ -5523,7 +5562,7 @@ export class ChatGptBrowserWorker {
             : undefined,
         ),
       );
-      console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence}`);
+      console.info(`[chatgpt-web] browser turn ${turn.traceId} submission accepted evidence=${finalSubmissionEvidence} acceptedIdentitySet=${submissionBaseline.acceptedUserIdentity !== undefined}`);
       let responseTurn = await this.waitForNewAssistantTurn(
         page,
         submissionBaseline,
