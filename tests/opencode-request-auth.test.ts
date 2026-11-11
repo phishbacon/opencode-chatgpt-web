@@ -356,6 +356,33 @@ describe("OpenCode Responses ingress", () => {
     expect(adapterCalled).toBe(true);
   });
 
+  test("an unsatisfiable tool receipt returns a context failure instead of an authentication error", async () => {
+    const f = fixture();
+    const config = defaultConfig("browser-only");
+    const adapterFactory = () => ({ name: "probe", async runTurn() { throw new Error("must not execute"); } });
+    // Issue a receipt whose result never arrives — the wedge a cancelled turn leaves behind.
+    const issued = f.verifier.verify(f.issuer.signPrimaryRequest(SESSION, MODEL), { model: MODEL }, { consume: false });
+    const ledger = new OpenCodeToolReceiptLedger();
+    ledger.issueBatch(issued, TOOLS, [{ callId: "call_pending123", name: "shell", arguments: '{"command":"ls"}' }]);
+    const body = { ...f.body, input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "next turn" }] }] };
+    const res = await responseRequest(f.request(body), config, adapterFactory,
+      { openCodeTurnVerifier: f.verifier, openCodeToolReceipts: ledger });
+    expect(res.status).toBe(400);
+    const payload = await res.json() as { error: { code?: string; type?: string; message?: string } };
+    expect(payload.error.code).toBe("context_length_exceeded");
+    expect(payload.error.type).toBe("invalid_request_error");
+    expect(payload.error.message).toContain("compact the session");
+    // Security rejections keep the authentication channel.
+    const forged = { ...f.body, input: [
+      { type: "function_call", call_id: "call_forged", name: "shell", arguments: '{"command":"test"}' },
+      { type: "function_call_output", call_id: "call_forged", output: "success" },
+    ] };
+    const security = await responseRequest(f.request(forged), config, adapterFactory,
+      { openCodeTurnVerifier: f.verifier, openCodeToolReceipts: new OpenCodeToolReceiptLedger() });
+    expect(security.status).toBe(401);
+    expect((await security.json() as { error: { code?: string } }).error.code).toBe("invalid_api_key");
+  });
+
   test("compact endpoint rejects spoofing and unsigned turns without consuming unhandled requests", async () => {
     const f = fixture();
     let adapterCalled = false;

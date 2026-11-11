@@ -1076,8 +1076,10 @@ export function buildResponseJSON(
   };
 }
 
-export function formatErrorResponse(status: number, type: string, message: string): Response {
-  return new Response(JSON.stringify({ error: classifyError(status, type, message) }), {
+export function formatErrorResponse(status: number, type: string, message: string, code?: string): Response {
+  const error = classifyError(status, type, message);
+  if (code !== undefined) error.code = code;
+  return new Response(JSON.stringify({ error }), {
     status, headers: { "Content-Type": "application/json" },
   });
 }

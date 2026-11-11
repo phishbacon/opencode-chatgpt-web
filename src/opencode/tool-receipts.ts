@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { OpenCodeTurnBindingError, hashOpenCodeWireTools, type OpenCodeTurnClaims } from "./turn-binding";
+import { ChatGptWebAdapterError } from "../adapters/chatgpt-web/adapter-error";
 
 interface IssuedCall {
   callId: string;
@@ -51,6 +52,19 @@ const TOOL_NAME = /^[\w.-]{1,160}$/;
 
 function fail(detail: string): never {
   throw new OpenCodeTurnBindingError(`OpenCode broker receipt: ${detail}`);
+}
+
+/**
+ * The ledger can never be satisfied by a later primary: the receipt's result never arrived
+ * and never will — its issuing turn died mid-batch. The designed boundary that retires
+ * absent receipts is compaction, so this surfaces as the non-retryable context failure that
+ * makes OpenCode compact; a 401 instead sends it into a blind retry loop that cannot succeed.
+ */
+function failCompactionRequired(detail: string): never {
+  throw new ChatGptWebAdapterError(
+    `OpenCode broker receipt: ${detail}; this context length can no longer reconcile the outstanding receipt — compact the session to retire it`,
+    { status: 400, errorType: "invalid_request_error", code: "context_length_exceeded", retryable: false },
+  );
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -243,9 +257,9 @@ export class OpenCodeToolReceiptLedger {
         fail("compaction requires canonical native tool history to retire receipts");
       }
       if (!summarizing && [...this.calls.values()].some(call => call.sessionID === claims.sessionID
-        && call.turnNonce === claims.turnNonce && call.outputHash === undefined)) fail("outstanding tool batch is absent");
+        && call.turnNonce === claims.turnNonce && call.outputHash === undefined)) failCompactionRequired("outstanding tool batch is absent");
       if (session && !advancingEpoch && !summarizing && session.calls.size > 0) {
-        fail("canonical history omitted previously issued OpenCode tools without trusted compaction");
+        failCompactionRequired("canonical history omitted previously issued OpenCode tools without trusted compaction");
       }
       if (advancingEpoch && options.consume !== false) session.compactionEpoch = claims.compactionEpoch;
       return;
@@ -299,7 +313,7 @@ export class OpenCodeToolReceiptLedger {
       }
     }
     for (const { call, output } of seen.values()) {
-      if (output === undefined) fail(`tool ${call.callId} has no result`);
+      if (output === undefined) failCompactionRequired(`tool ${call.callId} has no result`);
     }
     const pending = [...this.calls.values()].filter(call => call.sessionID === claims.sessionID
       && call.outputHash === undefined);
@@ -308,13 +322,13 @@ export class OpenCodeToolReceiptLedger {
     // after compaction reconciles them against the new canonical history.
     if (!advancingEpoch && !summarizing
       && (pending.length !== fresh.size || pending.some(call => !fresh.has(call.callId)))) {
-      fail("parallel tool batch has missing or unexpected results");
+      failCompactionRequired("parallel tool batch has missing or unexpected results");
     }
     // The upstream Codex rollout keeps previous native tool effects in its
     // canonical history. OpenCode must likewise carry every issued receipt
     // until its signed compaction hook authorizes dropping completed calls.
     if (session && !advancingEpoch && !summarizing && [...session.calls].some(id => !seen.has(id))) {
-      fail("canonical history omitted previously issued OpenCode tools without trusted compaction");
+      failCompactionRequired("canonical history omitted previously issued OpenCode tools without trusted compaction");
     }
     // A trusted compaction boundary retires receipts absent from the new
     // canonical history, including results that never arrived: the compacted

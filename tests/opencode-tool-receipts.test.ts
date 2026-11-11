@@ -14,6 +14,7 @@ import {
   type OpenCodeTurnClaims,
 } from "../src/opencode/turn-binding";
 import { OpenCodeToolReceiptLedger } from "../src/opencode/tool-receipts";
+import { ChatGptWebAdapterError } from "../src/adapters/chatgpt-web/adapter-error";
 
 const MODEL = "opencode-chatgpt-web/light";
 const SESSION = "ses_123456789";
@@ -29,6 +30,16 @@ const CALLS = [
   { callId: "call_alpha", name: "shell", arguments: '{"command":"echo ok"}' },
   { callId: "call_beta", name: "read", arguments: '{"path":"/tmp/fixture"}' },
 ];
+
+/** Receipt-gap failures must carry the wire type that makes OpenCode compact, not authenticate. */
+function capturedError(fn: () => void): Error {
+  try {
+    fn();
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error("expected a receipt gap failure");
+}
 
 const history = [
   { type: "message", role: "user", content: "Inspect the fixture" },
@@ -65,6 +76,13 @@ describe("OpenCode website tool receipt ledger", () => {
     f.ledger.validateContinuation(f.claims(), history);
     f.begin(SESSION, "msg_nextturn123");
     f.ledger.validateContinuation(f.claims(), history);
+    // Security rejections keep the authentication channel: only receipt gaps
+    // (whose designed remedy is compaction) may claim a context failure.
+    const forgedHistory = [...history, { type: "function_call", call_id: "call_ghost", name: "shell", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_ghost", output: "ghost" }] as const;
+    const security = capturedError(() => f.ledger.validateContinuation(f.claims(), forgedHistory));
+    expect(security.message).toContain("unissued or cross-session");
+    expect(security).not.toBeInstanceOf(ChatGptWebAdapterError);
   });
 
   test("rejects disappearing completed tool receipts without a trusted compaction", () => {
@@ -116,6 +134,11 @@ describe("OpenCode website tool receipt ledger", () => {
     f.ledger.issueBatch(owner, WIRE, CALLS);
     const missing = history.filter(item => item.type !== "function_call_output" || item.call_id !== "call_beta");
     expect(() => f.ledger.validateContinuation(owner, missing)).toThrow("tool call_beta has no result");
+    const gap = capturedError(() => f.ledger.validateContinuation(owner, missing));
+    expect(gap).toBeInstanceOf(ChatGptWebAdapterError);
+    expect((gap as ChatGptWebAdapterError).code).toBe("context_length_exceeded");
+    expect((gap as ChatGptWebAdapterError).status).toBe(400);
+    expect(gap.message).toContain("compact the session");
     expect(() => f.ledger.validateContinuation(owner, "unrelated prompt")).toThrow("outstanding tool batch is absent");
     f.ledger.validateContinuation(owner, history);
   });

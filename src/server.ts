@@ -741,6 +741,9 @@ export async function responseRequest(
     }
   } catch (error) {
     logRejection(error);
+    if (error instanceof ChatGptWebAdapterError) {
+      return formatErrorResponse(error.status, error.errorType, error.message, error.code);
+    }
     return formatErrorResponse(401, "authentication_error", error instanceof Error ? error.message : String(error));
   }
   if (!verifiedOpenCodeTurn) {
